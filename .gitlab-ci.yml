@@ -1,0 +1,80 @@
+# adapted from:
+# https://docs.gitlab.com/ci/docker/using_docker_build/#use-docker-in-docker
+default:
+  image: docker:28.5.2-cli
+  services:
+    # We also need privileged = true in GitLab Runner config
+    - docker:28.5.2-dind
+  tags:
+    # This must be the same tag as defined in GitLab
+    # Otherwise we will have permission issues when using DinD
+    # https://docs.gitlab.com/ci/docker/docker_build_troubleshooting/#error-during-connect-no-such-host
+    - tls-docker
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
+    - docker info
+stages:
+  - build
+  - test
+  - release
+  - deployment
+variables:
+  # When you use the dind service, you must instruct Docker to talk with
+  # the daemon started inside of the service. The daemon is available
+  # with a network connection instead of the default
+  # /var/run/docker.sock socket. Docker 19.03 does this automatically
+  # by setting the DOCKER_HOST in
+  # https://github.com/docker-library/docker/blob/d45051476babc297257df490d22cbd806f1b11e4/19.03/docker-entrypoint.sh#L23-L29
+  #
+  # The 'docker' hostname is the alias of the service container as described at
+  # https://docs.gitlab.com/ee/ci/services/#accessing-the-services.
+  #
+  # Specify to Docker where to create the certificates. Docker
+  # creates them automatically on boot, and creates
+  # `/certs/client` to share between the service and job
+  # container, thanks to volume mount from config.toml
+  DOCKER_TLS_CERTDIR: /certs
+  # Variable for where to be pushing / pulling the built image for testing
+  CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+  CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
+  # The access for deployment machine
+  # Defined in the UI
+  # MACHINE_DEPLOY_HOST:
+  # MACHINE_DEPLOY_USER:
+  # MACHINE_DEPLOY_SSH_PRIVATE_KEY:
+  # MACHINE_DEPLOY_SSH_KNOWN_HOSTS:
+build-job:
+  stage: build
+  script:
+    - docker build --pull -t $CONTAINER_TEST_IMAGE .
+    - docker push $CONTAINER_TEST_IMAGE
+test-job:
+  stage: test
+  script:
+    - echo "TODO"
+release-job:
+  stage: release
+  script:
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker tag $CONTAINER_TEST_IMAGE $CONTAINER_RELEASE_IMAGE
+    - docker push $CONTAINER_RELEASE_IMAGE
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+deploy-job:
+  stage: deployment
+  before_script:
+    - command -v ssh-agent >/dev/null || ( apt-get update -y && apt-get install openssh-client -y )
+    - eval $(ssh-agent -s)
+    - chmod 400 "$MACHINE_DEPLOY_SSH_PRIVATE_KEY"
+    - ssh-add "$MACHINE_DEPLOY_SSH_PRIVATE_KEY"
+    - mkdir ~/.ssh
+    - cp "$MACHINE_DEPLOY_SSH_KNOWN_HOSTS" ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+  script:
+    - ssh $MACHINE_DEPLOY_USER@$MACHINE_DEPLOY_HOST
+    # Need to log-in to our registry in the deploy machine!
+    - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
+    - echo "TODO"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  environment: production
