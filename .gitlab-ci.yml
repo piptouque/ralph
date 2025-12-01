@@ -1,0 +1,194 @@
+# adapted from:
+# https://docs.gitlab.com/ci/docker/using_docker_build/#use-docker-in-docker
+default:
+  image: docker:28.5.2-cli
+  services:
+    # We also need privileged = true in GitLab Runner config
+    - docker:28.5.2-dind
+  tags:
+    # This must be the same tag as defined in GitLab
+    # Otherwise we will have permission issues when using DinD
+    # https://docs.gitlab.com/ci/docker/docker_build_troubleshooting/#error-during-connect-no-such-host
+    - tls-docker
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
+    - docker info
+stages:
+  - build
+  - test
+  - release
+  - deployment
+variables:
+  # When you use the dind service, you must instruct Docker to talk with
+  # the daemon started inside of the service. The daemon is available
+  # with a network connection instead of the default
+  # /var/run/docker.sock socket. Docker 19.03 does this automatically
+  # by setting the DOCKER_HOST in
+  # https://github.com/docker-library/docker/blob/d45051476babc297257df490d22cbd806f1b11e4/19.03/docker-entrypoint.sh#L23-L29
+  #
+  # The 'docker' hostname is the alias of the service container as described at
+  # https://docs.gitlab.com/ee/ci/services/#accessing-the-services.
+  #
+  # Specify to Docker where to create the certificates. Docker
+  # creates them automatically on boot, and creates
+  # `/certs/client` to share between the service and job
+  # container, thanks to volume mount from config.toml
+  DOCKER_TLS_CERTDIR: /certs
+  # Variable for where to be pushing / pulling the built image for testing
+  CONTAINER_DEV_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-dev
+  CONTAINER_PROD_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-prod
+  CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
+  # The access for deployment machine
+  # Defined in the UI
+  # MACHINE_DEPLOY_HOST:
+  # MACHINE_DEPLOY_USER:
+  # MACHINE_DEPLOY_SSH_PRIVATE_KEY:
+  # MACHINE_DEPLOY_SSH_KNOWN_HOSTS:
+  TEST_PULL_IMAGE_LIST: elasticsearch:8.1.0 mongo:5.0.9 clickhouse/clickhouse-server:23.1.1.3077-alpine kklopfenstein/openstack-swift-keystone-docker
+build-job:
+  stage: build
+  script:
+    - docker image build --pull -t $CONTAINER_DEV_IMAGE . --target development
+    - docker image build --pull -t $CONTAINER_PROD_IMAGE . --target production
+    - docker image push $CONTAINER_DEV_IMAGE
+    - docker image push $CONTAINER_PROD_IMAGE
+build-package-job:
+  stage: build
+  image: python:3.12-slim
+  cache:
+    paths:
+      - .pip-cache/
+  before_script:
+    - python --version
+    - pip install --upgrade pip
+    - pip install build
+  script:
+    - python -m build
+  artifacts:
+    paths:
+      - dist/
+
+cache-test-job:
+  stage: test
+  cache:
+    key: "dockerimages"
+    paths:
+      - dockerimages
+  # CACHE docker images needed in tests
+  # see: https://stackoverflow.com/a/79684895
+  # The image names and tags MUST match those of `docker-compose.tests.yaml`
+  script:
+    - |-
+      for image in $TEST_PULL_IMAGE_LIST
+      do
+        FILE="dockerimages/$image"
+        if [ -e $FILE ]
+        then
+          echo "$FILE has already been saved."
+        else
+          mkdir -p $(dirname $FILE)
+          docker pull $image
+          docker image save -o $FILE $image
+        fi
+      done
+test-api-job:
+  stage: test
+  needs: ["cache-test-job"]
+  cache:
+    key: "dockerimages"
+    paths:
+      - dockerimages
+  rules:
+    - if: $SKIP_TESTS == "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      # Option 1
+      changes:
+        - src/**
+        - tests/**
+      # Option 2
+      when: manual
+      allow_failure: true
+    - when: on_success
+  script:
+    - echo "TODO"
+    - |-
+      for image in $TEST_PULL_IMAGE_LIST
+      do
+        FILE="dockerimages/$image"
+        docker image load -i $FILE
+      done
+    - docker image pull $CONTAINER_DEV_IMAGE
+    - echo 'RALPH_IMAGE=${CONTAINER_DEV_IMAGE}' > .env.tests
+    - echo 'DOCKER_USER=0' >> .env.tests
+    - docker compose -f docker-compose.tests.yaml --env-file .env.tests
+      up
+      --no-build --wait
+    # Only test the api for now
+    - docker compose -f docker-compose.tests.yaml --env-file .env.tests
+      exec app pytest ./tests/api
+test-models-job:
+  stage: test
+  rules:
+    - if: $SKIP_TESTS == "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      # Option 1
+      changes:
+        - src/**
+        - tests/**
+      # Option 2
+      when: manual
+      allow_failure: true
+    - when: on_success
+  script:
+    - docker image pull $CONTAINER_DEV_IMAGE
+    - echo 'RALPH_IMAGE=${CONTAINER_DEV_IMAGE}' > .env.tests
+    - echo 'DOCKER_USER=0' >> .env.tests
+    - docker compose -f docker-compose.tests.yaml --env-file .env.tests
+      up app
+      --no-build --wait
+    - docker compose -f docker-compose.tests.yaml --env-file .env.tests
+      exec app pytest ./tests/models
+
+release-job:
+  stage: release
+  script:
+    - docker image pull $CONTAINER_PROD_IMAGE
+    - docker image tag $CONTAINER_PROD_IMAGE $CONTAINER_RELEASE_IMAGE
+    - docker image push $CONTAINER_RELEASE_IMAGE
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+release-package-job:
+  stage: release
+  image: python:3.12-slim
+  needs: ["build-package-job"]
+  cache:
+    paths:
+      - .pip-cache/
+  before_script:
+    - python --version
+    - pip install --upgrade pip
+    - pip install twine
+  script:
+    - python3 -m twine upload --repository-url $CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/pypi -u gitlab-ci-token -p $CI_JOB_TOKEN dist/*
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+deploy-job:
+  stage: deployment
+  before_script:
+    - command -v ssh-agent >/dev/null || ( apt-get update -y && apt-get install openssh-client -y )
+    - eval $(ssh-agent -s)
+    - chmod 400 "$MACHINE_DEPLOY_SSH_PRIVATE_KEY"
+    - ssh-add "$MACHINE_DEPLOY_SSH_PRIVATE_KEY"
+    - mkdir ~/.ssh
+    - cp "$MACHINE_DEPLOY_SSH_KNOWN_HOSTS" ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+  script:
+    - ssh $MACHINE_DEPLOY_USER@$MACHINE_DEPLOY_HOST
+    # Need to log-in to our registry in the deploy machine!
+    - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
+    - echo "TODO"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  environment: production
