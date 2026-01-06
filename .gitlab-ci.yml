@@ -60,6 +60,22 @@ release-job:
     - docker push $CONTAINER_RELEASE_IMAGE
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
+release-openapi-python-client-job:
+  stage: release
+  needs: ["build-job"]
+  image: python:latest
+  variables:
+    TWINE_USERNAME: gitlab-ci-token
+    TWINE_PASSWORD: $CI_JOB_TOKEN
+  before_script:
+    # Do not execute the docker commands in this environment
+    - echo "Execute this script instead of the default `before_script`."
+  script:
+    - pip install openapi-python-client build twine
+    - openapi-python-client generate --path ./docs/features/openapi.json --output-path "ralph-openapi-python-client-$CI_COMMIT_REF_SLUG"
+    - cd "ralph-openapi-python-client-$CI_COMMIT_REF_SLUG"
+    - python -m build
+    - python -m twine upload --repository-url  ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi dist/*
 deploy-job:
   stage: deployment
   before_script:
