@@ -1,10 +1,13 @@
 """Main module for Ralph's LRS API."""
 
+from pathlib import Path
 from functools import lru_cache
 from typing import Any, Dict, List, Union
 from urllib.parse import urlparse
 
 import sentry_sdk
+from openapi_core import OpenAPI
+from openapi_core.contrib.fastapi.middlewares import FastAPIOpenAPIMiddleware
 from fastapi import Depends, FastAPI
 
 from ralph.conf import settings
@@ -42,6 +45,10 @@ if settings.SENTRY_DSN is not None:
     )
 
 app = FastAPI()
+
+api_src_dir = Path(__file__).parent.resolve()
+openapi_spec = OpenAPI.from_file_path(api_src_dir / 'openapi.yaml')
+app.add_middleware(FastAPIOpenAPIMiddleware, openapi=openapi_spec)
 app.include_router(statements.router)
 app.include_router(health.router)
 
