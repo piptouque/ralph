@@ -1,0 +1,72 @@
+services:
+  app:
+    image: "${RALPH_IMAGE}"
+    user: ${DOCKER_USER:-1000}
+    environment:
+      RALPH_BACKENDS__DATA__ES__TEST_HOSTS: http://elasticsearch:9200
+      RALPH_BACKENDS__DATA__MONGO__TEST_CONNECTION_URI: mongodb://mongo:27017/
+      RALPH_BACKENDS__DATA__CLICKHOUSE__TEST_HOST: clickhouse
+    command: sleep infinity
+
+  elasticsearch:
+    image: elasticsearch:8.1.0
+    environment:
+      bootstrap.memory_lock: true
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      cluster.routing.allocation.disk.watermark.low: "2gb"
+      cluster.routing.allocation.disk.watermark.high: "1gb"
+      cluster.routing.allocation.disk.watermark.flood_stage: "500mb"
+      cluster.info.update.interval: "1m"
+    expose:
+      - "9200"
+    mem_limit: 2g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: curl --fail http://localhost:9200/_cluster/health?wait_for_status=green || exit 1
+      interval: 1s
+      retries: 60
+
+  mongo:
+    image: mongo:5.0.9
+    expose:
+      - "27017"
+    healthcheck:
+      test: mongosh --eval 'db.runCommand("ping").ok' localhost:27017/test --quiet
+      interval: 1s
+      retries: 60
+
+  clickhouse:
+      image: clickhouse/clickhouse-server:23.1.1.3077-alpine
+      environment:
+          CLICKHOUSE_DB: xapi
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      expose:
+        - "8123"
+        - "9000"
+      # ClickHouse needs to maintain a lot of open files, so they
+      # suggest running the container with increased limits:
+      # https://hub.docker.com/r/clickhouse/clickhouse-server/#!
+      ulimits:
+          nofile:
+              soft: 262144
+              hard: 262144
+      healthcheck:
+        test:  wget --no-verbose --tries=1 --spider http://0.0.0.0:8123/ping || exit 1
+        interval: 1s
+        retries: 60
+
+  swift:
+    image: kklopfenstein/openstack-swift-keystone-docker
+    expose:
+      - "8080"
+      - "35357"
+    environment:
+      KS_SWIFT_PUBLIC_URL: http://swift:8080
+    healthcheck:
+        test: curl -s http://127.0.0.1:35357 || exit 1
+        interval: 1s
+        retries: 60
