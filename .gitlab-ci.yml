@@ -35,7 +35,8 @@ variables:
   # container, thanks to volume mount from config.toml
   DOCKER_TLS_CERTDIR: /certs
   # Variable for where to be pushing / pulling the built image for testing
-  CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+  CONTAINER_DEV_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-dev
+  CONTAINER_PROD_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-prod
   CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
   # The access for deployment machine
   # Defined in the UI
@@ -43,21 +44,80 @@ variables:
   # MACHINE_DEPLOY_USER:
   # MACHINE_DEPLOY_SSH_PRIVATE_KEY:
   # MACHINE_DEPLOY_SSH_KNOWN_HOSTS:
+  TEST_PULL_IMAGE_LIST: elasticsearch:8.1.0 mongo:5.0.9 clickhouse/clickhouse-server:23.1.1.3077-alpine kklopfenstein/openstack-swift-keystone-docker
 build-job:
   stage: build
   script:
-    - docker build --pull -t $CONTAINER_TEST_IMAGE .
-    - docker push $CONTAINER_TEST_IMAGE
-test-job:
+    - docker image build --pull -t $CONTAINER_DEV_IMAGE . --target development
+    - docker image build --pull -t $CONTAINER_PROD_IMAGE . --target production
+    - docker image push $CONTAINER_DEV_IMAGE
+    - docker image push $CONTAINER_PROD_IMAGE
+cache-test-job:
   stage: test
+  cache:
+    key: "dockerimages"
+    paths:
+      - dockerimages
+  # CACHE docker images needed in tests
+  # see: https://stackoverflow.com/a/79684895
+  # The image names and tags MUST match those of `docker-compose.tests.yaml`
+  script:
+    - |-
+      for image in $TEST_PULL_IMAGE_LIST
+      do
+        FILE="dockerimages/$image"
+        if [ -e $FILE ]
+        then
+          echo "$FILE has already been saved."
+        else
+          mkdir -p $(dirname $FILE)
+          docker pull $image
+          docker image save -o $FILE $image
+        fi
+      done
+test-api-job:
+  stage: test
+  needs: ["cache-test-job"]
+  cache:
+    key: "dockerimages"
+    paths:
+      - dockerimages
+  rules:
+    - if: $SKIP_TESTS == "true"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      # Option 1
+      changes:
+        - src/**
+        - tests/**
+      # Option 2
+      when: manual
+      allow_failure: true
+    - when: on_success
   script:
     - echo "TODO"
+    - |-
+      for image in $TEST_PULL_IMAGE_LIST
+      do
+        FILE="dockerimages/$image"
+        docker image load -i $FILE
+      done
+    - docker image pull $CONTAINER_DEV_IMAGE
+    - echo 'RALPH_IMAGE=${CONTAINER_DEV_IMAGE}' > .env.tests
+    - echo 'DOCKER_USER=0' >> .env.tests
+    - docker compose -f docker-compose.tests.yaml --env-file .env.tests
+      up
+      --no-build --wait
+    # Only test the api for now
+    - docker compose -f docker-compose.tests.yaml --env-file .env.tests
+      exec app pytest ./tests/api
+
 release-job:
   stage: release
   script:
-    - docker pull $CONTAINER_TEST_IMAGE
-    - docker tag $CONTAINER_TEST_IMAGE $CONTAINER_RELEASE_IMAGE
-    - docker push $CONTAINER_RELEASE_IMAGE
+    - docker image pull $CONTAINER_PROD_IMAGE
+    - docker image tag $CONTAINER_PROD_IMAGE $CONTAINER_RELEASE_IMAGE
+    - docker image push $CONTAINER_RELEASE_IMAGE
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 deploy-job:
