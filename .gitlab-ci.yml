@@ -52,6 +52,22 @@ build-job:
     - docker image build --pull -t $CONTAINER_PROD_IMAGE . --target production
     - docker image push $CONTAINER_DEV_IMAGE
     - docker image push $CONTAINER_PROD_IMAGE
+build-package-job:
+  stage: build
+  image: python:3.12-slim
+  cache:
+    paths:
+      - .pip-cache/
+  before_script:
+    - python --version
+    - pip install --upgrade pip
+    - pip install build
+  script:
+    - python -m build
+  artifacts:
+    paths:
+      - dist/
+
 cache-test-job:
   stage: test
   cache:
@@ -118,6 +134,21 @@ release-job:
     - docker image pull $CONTAINER_PROD_IMAGE
     - docker image tag $CONTAINER_PROD_IMAGE $CONTAINER_RELEASE_IMAGE
     - docker image push $CONTAINER_RELEASE_IMAGE
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+release-package-job:
+  stage: release
+  image: python:3.12-slim
+  needs: ["build-package-job"]
+  cache:
+    paths:
+      - .pip-cache/
+  before_script:
+    - python --version
+    - pip install --upgrade pip
+    - pip install twine
+  script:
+    - python3 -m twine upload --repository-url $CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/pypi -u gitlab-ci-token -p $CI_JOB_TOKEN dist/*
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 deploy-job:
