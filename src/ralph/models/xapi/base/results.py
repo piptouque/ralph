@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Union
 from pydantic import Field, StrictBool, model_validator
 from typing_extensions import Annotated
 
-from ralph.conf import NonEmptyStrictStr
+from ralph.conf import StrictStr
 
 from ..config import BaseModelWithConfig
 from .common import IRI
@@ -58,6 +58,6 @@ class BaseXapiResult(BaseModelWithConfig):
     score: Optional[BaseXapiResultScore] = None
     success: Optional[StrictBool] = None
     completion: Optional[StrictBool] = None
-    response: Optional[NonEmptyStrictStr] = None
+    response: Optional[StrictStr] = None
     duration: Optional[timedelta] = None
     extensions: Optional[Dict[IRI, Union[str, int, bool, list, dict, None]]] = None

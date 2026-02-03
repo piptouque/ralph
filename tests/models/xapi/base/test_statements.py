@@ -30,7 +30,7 @@ from tests.factories import ModelFactory, mock_xapi_instance
     "path",
     ["id", "stored", "verb__display", "result__score__raw"],
 )
-@pytest.mark.parametrize("value", [None, "", {}])
+@pytest.mark.parametrize("value", [None, {}])
 def test_models_xapi_base_statement_with_invalid_null_values(path, value):
     """Test that the statement does not accept any null values.
 
@@ -44,7 +44,7 @@ def test_models_xapi_base_statement_with_invalid_null_values(path, value):
     statement = statement.model_dump(exclude_none=True)
     set_dict_value_from_path(statement, path.split("__"), value)
 
-    with pytest.raises(ValidationError, match="invalid empty value"):
+    with pytest.raises(ValidationError, match="invalid null value"):
         BaseXapiStatement(**statement)
 
 

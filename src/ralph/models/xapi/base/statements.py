@@ -48,17 +48,17 @@ class BaseXapiStatement(BaseModelWithConfig):
 
     @model_validator(mode="before")
     @classmethod
-    def check_absence_of_empty_and_invalid_values(cls, values: Any) -> Any:
-        """Check the model for empty and invalid values.
+    def check_absence_of_null_and_invalid_values(cls, values: Any) -> Any:
+        """Check the model for null and invalid values.
 
         Check that the `context` field contains `platform` and `revision` fields
         only if the `object.objectType` property is equal to `Activity`.
         """
         for field, value in list(values.items()):
-            if value in [None, "", {}]:
-                raise ValueError(f"{field}: invalid empty value")
+            if value in [None, {}]:
+                raise ValueError(f"{field}: invalid null value")
             if isinstance(value, dict) and field != "extensions":
-                cls.check_absence_of_empty_and_invalid_values(value)
+                cls.check_absence_of_null_and_invalid_values(value)
 
         context = dict(values.get("context", {}))
         if context:
