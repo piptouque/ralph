@@ -37,6 +37,7 @@ MODEL_PATH_SEPARATOR = "__"
 
 NonEmptyStr = Annotated[str, Field(min_length=1)]
 NonEmptyStrictStr = Annotated[str, StringConstraints(min_length=1, strict=True)]
+StrictStr = Annotated[str, StringConstraints(min_length=0, strict=True)]
 
 BASE_SETTINGS_CONFIG = SettingsConfigDict(
     case_sensitive=True, env_nested_delimiter="__", env_prefix="RALPH_", extra="ignore"
@@ -132,7 +133,7 @@ class AuthBackend(str, Enum):
 
 
 def validate_auth_backends(
-    value: Union[str, Tuple[str, ...], List[str]]
+    value: Union[str, Tuple[str, ...], List[str]],
 ) -> Tuple[AuthBackend]:
     """Check whether the value is a comma separated string or a list/tuple."""
     if isinstance(value, (tuple, list)):
