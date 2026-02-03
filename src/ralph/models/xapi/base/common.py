@@ -49,7 +49,11 @@ class LanguageMap(RootModel[Dict[LanguageTag, str]]):
         str_min_length=0, coerce_numbers_to_str=False, strict=True
     )
 
-ExtensionMap = Dict[IRI, Union[str, int, bool, list, dict, None]]
+
+class ExtensionMap(RootModel[Dict[IRI, Union[str, int, bool, list, dict, None]]]):
+    """Pydantic custom data type for XAPI context and object definitions extensions."""
+
+    model_config = ConfigDict(str_min_length=0, coerce_numbers_to_str=True)
 
 
 class MailtoEmail(RootModel[str]):

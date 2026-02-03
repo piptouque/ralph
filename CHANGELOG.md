@@ -20,6 +20,7 @@ and this project adheres to
 
 - Fix type of `statement.result.score.scaled` from `int` to `Decimal`
 - Replace deprecated `git whatchanged` command in CI.
+- Fix XAPI definitions extentions not accepting empty strings as values.
 
 ## [5.0.1] - 2024-07-11
 
