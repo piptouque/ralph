@@ -3,10 +3,8 @@
 from typing import Dict, Type, Union
 
 from langcodes import tag_is_valid
-from pydantic import RootModel, model_validator, validate_email
+from pydantic import ConfigDict, RootModel, model_validator, validate_email
 from rfc3987 import parse
-
-from ralph.conf import NonEmptyStrictStr
 
 
 class IRI(RootModel[Union["IRI", str]]):
@@ -44,7 +42,12 @@ class LanguageTag(RootModel[Union[str, "LanguageTag"]]):
         return str(tag)
 
 
-LanguageMap = Dict[LanguageTag, NonEmptyStrictStr]
+class LanguageMap(RootModel[Dict[LanguageTag, str]]):
+    """Pydantic custom data type of language maps."""
+
+    model_config = ConfigDict(
+        str_min_length=0, coerce_numbers_to_str=False, strict=True
+    )
 
 
 class MailtoEmail(RootModel[str]):

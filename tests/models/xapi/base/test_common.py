@@ -92,7 +92,7 @@ def test_models_xapi_base_common_field_language_tag_with_invalid_data(values):
         DummyLanguageTagModel(**values)
 
 
-@pytest.mark.parametrize("values", [({"map": {"en": "Hello"}})])
+@pytest.mark.parametrize("values", [{"map": {"en": "Hello"}}, {"map": {"en": ""}}])
 def test_models_xapi_base_common_field_language_map_with_valid_data(values):
     """Test that a valid verb field does not raise a `ValidationError`."""
 
