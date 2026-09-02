@@ -11,6 +11,7 @@ and this project adheres to
 ### Added
 
 - API: support for CORS request
+- Backends: (internal) add support for multiple authority queries
 
 ### Removed
 
