@@ -12,6 +12,7 @@ from ralph.conf import settings
 
 from .. import __version__
 from .auth import get_authenticated_user
+from .auth.oidc import AuthenticatedOidcUser
 from .auth.user import AuthenticatedUser
 from .routers import health, statements
 
@@ -66,7 +67,12 @@ async def whoami(
     user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> Dict[str, Any]:
     """Return the current user's username along with their scopes."""
-    return {
+    data = {
         "agent": user.agent.model_dump(mode="json", exclude_none=True),
         "scopes": user.scopes,
     }
+    if settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP and isinstance(
+        user, AuthenticatedOidcUser
+    ):
+        data["client_agents"] = user.client_agents
+    return data

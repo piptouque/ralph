@@ -24,6 +24,7 @@ from pydantic.types import Json
 from typing_extensions import Annotated
 
 from ralph.api.auth import get_authenticated_user
+from ralph.api.auth.oidc import AuthenticatedOidcUser
 from ralph.api.auth.user import AuthenticatedUser
 from ralph.api.forwarding import forward_xapi_statements, get_active_xapi_forwardings
 from ralph.api.models import ErrorDetail, LaxStatement
@@ -144,7 +145,7 @@ def strict_query_params(request: Request) -> None:
 
 @router.get("")
 @router.get("/")
-async def get(  # noqa: PLR0913
+async def get(  # noqa: PLR0912, PLR0913
     request: Request,
     current_user: Annotated[
         AuthenticatedUser,
@@ -385,16 +386,29 @@ async def get(  # noqa: PLR0913
     if settings.LRS_RESTRICT_BY_SCOPES:
         if not current_user.scopes.is_authorized("statements/read"):
             mine = True
-    # mine: If using only authority, always restrict (otherwise, use the default value)
+    # mine: If using only authority, always restrict
+    #       (otherwise, use the default value)
     elif settings.LRS_RESTRICT_BY_AUTHORITY:
         mine = True
 
     # Filter by authority if using `mine`
     if mine:
-        query_params["authority"] = _parse_agent_parameters(
-            current_user.agent.model_dump(mode="json")
-        ).model_dump(mode="json", exclude_none=True)
-
+        filtering_agents = [current_user.agent]
+        if (
+            settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP
+            and isinstance(current_user, AuthenticatedOidcUser)
+            and current_user.client_agents is not None
+        ):
+            # If filtering by ownership,
+            # Filter by any authority that this user has access to:
+            # That is, their own, and that of any OIDC client they own.
+            filtering_agents += current_user.client_agents
+        query_params["authority"] = [
+            _parse_agent_parameters(agent.model_dump(mode="json")).model_dump(
+                mode="json", exclude_none=True
+            )
+            for agent in filtering_agents
+        ]
     if "mine" in query_params:
         query_params.pop("mine")
 
