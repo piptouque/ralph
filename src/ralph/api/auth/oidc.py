@@ -15,8 +15,10 @@ from jose.exceptions import JWTClaimsError
 from pydantic import AnyUrl, BaseModel, ConfigDict
 from typing_extensions import Annotated
 
+from ralph.api.auth import scim
 from ralph.api.auth.user import AuthenticatedUser, Scope, UserScopes
 from ralph.conf import settings
+from ralph.models.xapi.base.agents import BaseXapiAgentWithOpenId
 
 OPENID_CONFIGURATION_PATH = "/.well-known/openid-configuration"
 oauth2_scheme = OpenIdConnect(
@@ -89,29 +91,69 @@ class TokenIntrospection(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-def make_authenticated_oidc_user(iss: str, user_info: UserInfo) -> AuthenticatedUser:
-    """Factory function for `AuthenticatedUser` when it is an OIDC user."""
-    return AuthenticatedUser(
-        agent={"openid": f"{iss}/{user_info.sub}"},
-        scopes=get_user_scopes(user_info.scope),
-        target=user_info.target,
-    )
+class AuthenticatedOidcClient(AuthenticatedUser):
+    """Pydantic model for OIDC clients that authenticate as users.
 
+    Has additional information related to OpenID connect auth.
 
-def make_authenticated_oidc_client(token_info: TokenIntrospection) -> AuthenticatedUser:
-    """Factory function for `AuthenticatedUser` when it is a OIDC client.
-
-    This is an application token, we don't have a user to get.
-    So we use the client_id to indentify it instead
+    Attributes:
+        iss (str): OIDC issuer
+        client_id (str): OIDC client id.
     """
-    return AuthenticatedUser(
-        agent={"openid": f"{token_info.iss}/application/{token_info.client_id}"},
-        scopes=get_user_scopes(token_info.scope),
-        target=token_info.target,
-    )
+
+    client_id: str
+
+    @classmethod
+    def get_agent(cls, iss: str, client_id: str) -> BaseXapiAgentWithOpenId:
+        return BaseXapiAgentWithOpenId(openid=f"{iss}/application/{client_id}")
+
+    @classmethod
+    def make(cls, token_info: TokenIntrospection):
+        """Factory function for `AuthenticatedUser` when it is a OIDC client.
+
+        This is an application token, we don't have a user to get.
+        So we use the client_id to indentify it instead
+        """
+        return cls(
+            agent=cls.get_agent(iss=token_info.iss, client_id=token_info.client_id),
+            client_id=token_info.client_id,
+            scopes=get_user_scopes(token_info.scope),
+            target=token_info.target,
+        )
 
 
-@lru_cache(maxsize=1)
+class AuthenticatedOidcUser(AuthenticatedUser):
+    """Pydantic model for OIDC authenticated users.
+
+    Has additional information related to OpenID connect auth.
+
+    Attributes:
+        iss (str): OIDC issuer
+        sub (str): OIDC user sub (identifier).
+    """
+
+    client_agents: Optional[list[BaseXapiAgentWithOpenId]]
+
+    @classmethod
+    def get_agent(cls, iss: str, sub: str) -> BaseXapiAgentWithOpenId:
+        return BaseXapiAgentWithOpenId(openid=f"{iss}/{sub}")
+    @classmethod
+    def make(
+        cls,
+        iss: str,
+        user_info: UserInfo,
+        client_agents: Optional[list[BaseXapiAgentWithOpenId]] = None,
+    ):
+        """Factory function for `AuthenticatedUser` when it is an OIDC user."""
+        return cls(
+            agent=cls.get_agent(iss=iss, sub=user_info.sub),
+            scopes=get_user_scopes(user_info.scope),
+            target=user_info.target,
+            client_agents=client_agents,
+        )
+
+
+@lru_cache()
 def discover_provider(base_url: AnyUrl) -> Dict:
     """Discover the authentication server (or OpenId Provider) configuration."""
     try:
@@ -328,7 +370,7 @@ def _can_query_user_info(provider_config: dict) -> bool:
 
 def get_oidc_user(
     auth_header: Annotated[Optional[HTTPBearer], Depends(oauth2_scheme)],
-) -> AuthenticatedUser:
+) -> AuthenticatedOidcUser | AuthenticatedOidcClient:
     """Decode and validate OpenId Connect ID token against issuer in config.
 
     Args:
@@ -359,7 +401,7 @@ def get_oidc_user(
             encoded_user_info=access_token, provider_config=provider_config
         )
         user_info = UserInfo.model_validate(id_token)
-        return make_authenticated_oidc_user(iss=id_token["iss"], user_info=user_info)
+        return AuthenticatedOidcUser.make(iss=id_token["iss"], user_info=user_info)
 
     client_basic_auth_header = get_client_basic_auth_header(
         client_id=settings.RUNSERVER_AUTH_OIDC_CLIENT_ID,
@@ -371,9 +413,10 @@ def get_oidc_user(
         token=access_token,
         client_basic_auth_header=client_basic_auth_header,
     )
-
     if not token_info.sub:
-        return make_authenticated_oidc_client(token_info)
+        # this is an application token, we don't have a user to get
+        # so we use the client_id to indentify it instead
+        return AuthenticatedOidcClient.make(token_info)
     else:
         # This is a real user, we can retrieve their user info
         user_info = get_user_info(provider_config, auth_header=auth_header)
@@ -386,5 +429,25 @@ def get_oidc_user(
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        client_agents = None
+        if settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP:
+            try:
+                client_ids = scim.get_user_owned_client_ids(
+                    user_sub=user_info.sub,
+                    client_ownership_config=settings.RUNSERVER_SCIM_CLIENT_OWNERSHIP,
+                    access_token=access_token,
+                )
+                client_agents = [
+                    AuthenticatedOidcClient.get_agent(iss=token_info.iss, client_id=client_id)
+                    for client_id in client_ids
+                ]
+            except HTTPException:
+                client_agents = None
+                logger.warning(
+                    ("Could not get client ids owner by user: %s, exception occured"),
+                    user_info.sub,
+                )
 
-        return make_authenticated_oidc_user(iss=token_info.iss, user_info=user_info)
+        return AuthenticatedOidcUser.make(
+            iss=token_info.iss, user_info=user_info, client_agents=client_agents
+        )
