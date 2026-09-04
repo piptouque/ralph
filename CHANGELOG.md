@@ -12,6 +12,11 @@ and this project adheres to
 
 - API: support for CORS request
 - Backends: (internal) add support for multiple authority queries
+- Add the LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP
+  option to extend Authority restriction to 'Client Ownership'(OIDC only)
+  - Requires LRS_RESTRICT_BY_AUTHORITY (would not have any effect otherwise)
+  - Done using SCIM calls via the provided endpoint and schemas (conf values)
+  - Add 'Client agents' info to `/whoami` endpoint when it is enabled
 
 ### Removed
 

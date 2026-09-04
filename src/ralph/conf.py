@@ -1,12 +1,13 @@
 """Configurations for Ralph."""
 
-import os
 import io
+import os
 from enum import Enum
 from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
+import jq
 from pydantic import (
     AfterValidator,
     AnyHttpUrl,
@@ -45,8 +46,11 @@ NonEmptyStrictStr = Annotated[str, StringConstraints(min_length=1, strict=True)]
 StrictStr = Annotated[str, StringConstraints(min_length=0, strict=True)]
 
 BASE_SETTINGS_CONFIG = SettingsConfigDict(
-    case_sensitive=True, env_nested_delimiter="__", env_prefix="RALPH_", extra="ignore"
-    , secrets_dir=os.environ.get("RALPH_SECRETS_DIR")
+    case_sensitive=True,
+    env_nested_delimiter="__",
+    env_prefix="RALPH_",
+    extra="ignore",
+    secrets_dir=os.environ.get("RALPH_SECRETS_DIR"),
 )
 
 
@@ -155,6 +159,54 @@ AuthBackends = Annotated[
     Union[str, Tuple[str, ...], List[str]], AfterValidator(validate_auth_backends)
 ]
 
+
+def validate_jq_expression(value: str) -> str:
+    """Check that the value gets compiled by jq without error."""
+    _ = jq.compile(value)
+    return value
+
+
+def validate_scim_extension_urn(value: str) -> str:
+    """Incomplete check for SCIM schema extension URNs.
+
+    Should be enough for this use case.
+    """
+    if not value.startswith("urn:ietf:params:scim:schemas:extension:"):
+        raise ValueError("Wrong SICM schema extension URN format")
+    return value
+
+
+class ClientOwnershipScimSettings(BaseModel):
+    """Pydantic model for SCIM-related settings.
+
+    Used if LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP is enabled.
+    """
+
+    resource_types_endpoint: AnyHttpUrl = Field(
+        title="SCIM `/ResourceTypes` endpoint",
+        description="Used if authority is extended to 'Client ownership'",
+    )
+    user_extension_schema: Annotated[
+        str, AfterValidator(validate_scim_extension_urn)
+    ] = Field(
+        title="SCIM 'Client ownership' user extension schema",
+        description="Used if authority is extended to 'Client ownership'",
+    )
+    group_extension_schema: Annotated[
+        str, AfterValidator(validate_scim_extension_urn)
+    ] = Field(
+        title="SCIM 'Client ownership' group extension schema",
+        description="Used if authority is extended to 'Client ownership'",
+    )
+    extension_schema_jq_path: Annotated[str, AfterValidator(validate_jq_expression)] = (
+        Field(
+            title="SCIM 'Client ownership' extension schema JQ path"
+            " to a list of client ids",
+            description="Used if authority is extended to 'Client ownership'",
+        )
+    )
+
+
 CorsAllowOriginUrlTypeAdapter = TypeAdapter(
     Annotated[
         AnyHttpUrl,
@@ -191,10 +243,13 @@ def validate_cors_allow_origin_url(
         raise ValueError("CORS AllowOrigin URLs should have an empty path")
     parsed_url = urlparse(value)
     explicit_port = parsed_url.port
-    port_suffix = ':' + str(explicit_port) if explicit_port is not None else ''
+    port_suffix = ":" + str(explicit_port) if explicit_port is not None else ""
     origin = f"{url.scheme}://{url.host}{port_suffix}"
     if origin != str(value):
-        raise ValueError(f"CORS AllowOrigin URL format incorrect. Expected: {origin}, got: {str(value)}")
+        raise ValueError(
+            f"CORS AllowOrigin URL format incorrect."
+            f"Expected: {origin}, got: {str(value)}"
+        )
     return origin
 
 
@@ -270,8 +325,18 @@ class Settings(BaseSettings):
             ["https://my-allowed-origin.com", "https://my-other-allowed-origin.com"]
         ],
     )
+    RUNSERVER_SCIM_CLIENT_OWNERSHIP: Optional[ClientOwnershipScimSettings] = Field(
+        None,
+        title="SCIM 'Client ownership' feature",
+        description="Used if authority is extended to 'Client ownership'",
+    )
     LRS_RESTRICT_BY_AUTHORITY: bool = False
     LRS_RESTRICT_BY_SCOPES: bool = False
+    LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP: bool = Field(
+        False,
+        description="When GETing statements with `mine=True`,"
+        "users also get statements coming from OIDC clients",
+    )
     SENTRY_CLI_TRACES_SAMPLE_RATE: float = 1.0
     SENTRY_DSN: Optional[str] = None
     SENTRY_IGNORE_HEALTH_CHECKS: bool = False
@@ -300,11 +365,36 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def check_restriction_compatibility(self):
-        """Raise an error if scopes are being used without authority restriction."""
+        """Raise an error if 'Restrict' config is incorrectly set.
+
+        - scopes are being used without authority restriction.
+        - 'client ownership' authority extension is used with OIDC disabled.
+        - 'client ownership' authority extension is enabled but the SCIM-related config
+           is not/incorrectly set.
+
+        restriction.
+        """
         if self.LRS_RESTRICT_BY_SCOPES and not self.LRS_RESTRICT_BY_AUTHORITY:
             raise ConfigurationException(
                 "LRS_RESTRICT_BY_AUTHORITY must be set to True if using "
                 "LRS_RESTRICT_BY_SCOPES=True"
+            )
+        if (
+            self.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP
+            and AuthBackend.OIDC not in self.RUNSERVER_AUTH_BACKENDS
+        ):
+            raise ConfigurationException(
+                "OIDC backend must be enabled if using "
+                "LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP=True"
+            )
+
+        if (
+            self.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP
+            and not self.RUNSERVER_SCIM_CLIENT_OWNERSHIP
+        ):
+            raise ConfigurationException(
+                "RUNSERVER_SCIM_CLIENT_OWNERSHIP must be set if using "
+                "LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP=True"
             )
         return self
 

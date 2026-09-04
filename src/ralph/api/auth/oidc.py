@@ -13,8 +13,10 @@ from jose.exceptions import JWTClaimsError
 from pydantic import AnyUrl, BaseModel, ConfigDict
 from typing_extensions import Annotated
 
+from ralph.api.auth import scim
 from ralph.api.auth.user import AuthenticatedUser, Scope, UserScopes
 from ralph.conf import settings
+from ralph.models.xapi.base.agents import BaseXapiAgent, BaseXapiAgentWithOpenId
 
 OPENID_CONFIGURATION_PATH = "/.well-known/openid-configuration"
 oauth2_scheme = OpenIdConnect(
@@ -25,6 +27,46 @@ oauth2_scheme = OpenIdConnect(
 
 # API auth logger
 logger = logging.getLogger(__name__)
+
+
+class AuthenticatedOidcClient(AuthenticatedUser):
+    """Pydantic model for OIDC clients that authenticate as users.
+
+    Has additional information related to OpenID connect auth.
+
+    Attributes:
+        iss (str): OIDC issuer
+        client_id (str): OIDC client id.
+    """
+
+    iss: str
+    client_id: str
+
+    @staticmethod
+    def get_agent(iss: str, client_id: str) -> BaseXapiAgent:
+        """Build the xAPI agent from a OIDC client."""
+        return BaseXapiAgentWithOpenId(openid=f"{iss}/application/{client_id}")
+
+
+class AuthenticatedOidcUser(AuthenticatedUser):
+    """Pydantic model for OIDC authenticated users.
+
+    Has additional information related to OpenID connect auth.
+
+    Attributes:
+        iss (str): OIDC issuer
+        sub (str): OIDC user sub (identifier).
+    """
+
+    iss: str
+    sub: str
+
+    client_agents: Optional[list[BaseXapiAgent]]
+
+    @staticmethod
+    def get_agent(iss: str, sub: str) -> BaseXapiAgent:
+        """Build the xAPI agent from a OIDC user."""
+        return BaseXapiAgentWithOpenId(openid=f"{iss}/user/{sub}")
 
 
 class UserInfo(BaseModel):
@@ -265,7 +307,7 @@ def get_user_scopes(oidc_scopes: Optional[str]) -> UserScopes:
 
 def get_oidc_user(
     auth_header: Annotated[Optional[HTTPBearer], Depends(oauth2_scheme)],
-) -> AuthenticatedUser:
+) -> AuthenticatedOidcUser | AuthenticatedOidcClient:
     """Decode and validate OpenId Connect ID token against issuer in config.
 
     Args:
@@ -307,17 +349,44 @@ def get_oidc_user(
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        client_agents = None
+        if settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP:
+            try:
+                client_ids = scim.get_user_owned_client_ids(
+                    user_sub=user_info.sub,
+                    client_ownership_config=settings.RUNSERVER_SCIM_CLIENT_OWNERSHIP,
+                    access_token=access_token,
+                )
+                client_agents = [
+                    AuthenticatedOidcClient.get_agent(token_info.iss, client_id)
+                    for client_id in client_ids
+                ]
+            except HTTPException:
+                client_agents = None
+                logger.warning(
+                    ("Could not get client ids owner by user: %s, exception occured"),
+                    user_info.sub,
+                )
 
-        return AuthenticatedUser(
-            agent={"openid": f"{token_info.iss}/user/{user_info.sub}"},
+        return AuthenticatedOidcUser(
             scopes=get_user_scopes(user_info.scope),
             target=user_info.target,
+            iss=token_info.iss,
+            sub=user_info.sub,
+            client_agents=client_agents,
+            agent=AuthenticatedOidcUser.get_agent(
+                iss=token_info.iss, sub=user_info.sub
+            ),
         )
     else:
         # this is an application token, we don't have a user to get
         # so we use the client_id to indentify it instead
-        return AuthenticatedUser(
-            agent={"openid": f"{token_info.iss}/application/{token_info.client_id}"},
+        return AuthenticatedOidcClient(
             scopes=get_user_scopes(token_info.scope),
             target=token_info.target,
+            iss=token_info.iss,
+            client_id=token_info.client_id,
+            agent=AuthenticatedOidcClient.get_agent(
+                iss=token_info.iss, client_id=token_info.client_id
+            ),
         )
