@@ -149,10 +149,10 @@ def discover_provider(base_url: AnyUrl) -> Dict:
         ) from exc
 
 
-def get_user_info(provider_config: dict, access_token: str) -> UserInfo:
+def get_user_info(provider_config: dict, auth_header: str) -> UserInfo:
     """Get the user's info from the IdP using the /userinfo OIDC endpoint."""
     user_info, is_encoded = get_user_info_data(
-        provider_config["userinfo_endpoint"], access_token
+        userinfo_endpoint=provider_config["userinfo_endpoint"], auth_header=auth_header
     )
     if not is_encoded:
         # nothing to do
@@ -167,7 +167,7 @@ def get_user_info(provider_config: dict, access_token: str) -> UserInfo:
     lock=Lock(),
 )
 def get_user_info_data(
-    userinfo_endpoint: AnyUrl, access_token: str
+    userinfo_endpoint: AnyUrl, auth_header: str
 ) -> Union[tuple[dict, Literal[False]], tuple[str, Literal[True]]]:
     """Get the user's info from the IdP using the /userinfo OIDC endpoint.
 
@@ -181,7 +181,7 @@ def get_user_info_data(
     try:
         response = requests.get(
             f"{userinfo_endpoint}",
-            headers={"Authorization": f"Bearer {access_token}"},
+            headers={"Authorization": auth_header},
             timeout=5,
         )
         response.raise_for_status()
@@ -250,6 +250,41 @@ def encode_client_secret_basic_token(client_id: str, client_secret: str) -> str:
     ).decode("utf-8")
 
 
+def get_client_basic_auth_header(client_id: str, client_secret: str) -> str:
+    """Get a `client_secret_basic` token endpoint authentication header."""
+    token = encode_client_secret_basic_token(
+        client_id=client_id, client_secret=client_secret
+    )
+    return f"Basic {token}"
+
+
+@cached(
+    cache=TTLCache(maxsize=settings.AUTH_CACHE_MAX_SIZE, ttl=6),
+    lock=Lock(),
+)
+def get_client_credentials_auth_header(
+    token_endpoint: AnyUrl, client_basic_auth_header: str
+) -> str:
+    """Authenticate to IdP as Ralph using ClientCredentials flow."""
+    try:
+        response = requests.post(
+            f"{token_endpoint}",
+            headers={"Authorization": client_basic_auth_header},
+            data={"grant_type": "client_credentials"},
+            timeout=5,
+        )
+        response.raise_for_status()
+        token_data = response.json()
+    except requests.exceptions.RequestException as exc:
+        logger.error("Unable to get client_credentials auth token: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    return token_data["token_type"] + " " + token_data["access_token"]
+
+
 @cached(
     cache=TTLCache(
         maxsize=settings.AUTH_CACHE_MAX_SIZE, ttl=settings.AUTH_OIDC_CACHE_TTL
@@ -257,19 +292,14 @@ def encode_client_secret_basic_token(client_id: str, client_secret: str) -> str:
     lock=Lock(),
 )
 def get_token_info(
-    introspection_endpoint: AnyUrl, token: str, client_id: str, client_secret: str
+    introspection_endpoint: AnyUrl, token: str, client_basic_auth_header: str
 ) -> TokenInfo:
     """Get info on given token from the IdP using /introspection OIDC endpoint."""
     token_info = None
     try:
         response = requests.post(
             f"{introspection_endpoint}",
-            headers={
-                "Authorization": "Basic "
-                + encode_client_secret_basic_token(
-                    client_id=client_id, client_secret=client_secret
-                )
-            },
+            headers={"Authorization": client_basic_auth_header},
             data={
                 "token": f"{token}",
             },
@@ -355,15 +385,19 @@ def get_oidc_user(
     access_token = auth_header.split(" ")[-1]
     provider_config = discover_provider(settings.RUNSERVER_AUTH_OIDC_ISSUER_URI)
 
-    token_info = get_token_info(
-        provider_config["introspection_endpoint"],
-        token=access_token,
+    client_basic_auth_header = get_client_basic_auth_header(
         client_id=settings.RUNSERVER_AUTH_OIDC_CLIENT_ID,
         client_secret=settings.RUNSERVER_AUTH_OIDC_CLIENT_SECRET,
     )
+
+    token_info = get_token_info(
+        provider_config["introspection_endpoint"],
+        token=access_token,
+        client_basic_auth_header=client_basic_auth_header,
+    )
     if token_info.sub:
         # This is a real user, we can retrieve their user info
-        user_info = get_user_info(provider_config, access_token=access_token)
+        user_info = get_user_info(provider_config, auth_header=auth_header)
         if user_info.sub != token_info.sub:
             logger.error(
                 ("Inconsistent token subject: %s != %s"), user_info.sub, token_info.sub
@@ -376,10 +410,18 @@ def get_oidc_user(
         client_agents = None
         if settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP:
             try:
+                client_credentials_auth_header = get_client_credentials_auth_header(
+                    token_endpoint=provider_config["token_endpoint"],
+                    client_basic_auth_header=client_basic_auth_header,
+                )
+                # NOTE: must have authorisation for performing SCIM operations.
+                #       the most convenient way to do that is to authorise Ralph
+                #       to perform the operations, instead of the user.
+                #       so we reuse the ClientCredentials auth_header.
                 client_ids = scim.get_user_owned_client_ids(
                     user_sub=user_info.sub,
                     client_ownership_config=settings.RUNSERVER_SCIM_CLIENT_OWNERSHIP,
-                    access_token=access_token,
+                    auth_header=client_credentials_auth_header,
                 )
                 client_agents = [
                     AuthenticatedOidcClient.get_agent(token_info.iss, client_id)
