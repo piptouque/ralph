@@ -1,29 +1,33 @@
 """SCIM client tool for the Ralph API."""
 
 import logging
-from functools import lru_cache
+from threading import Lock
 from typing import Dict
 
 import jq
 import requests
+from cachetools import TTLCache, cached
 from fastapi import HTTPException, status
 from pydantic import AnyUrl
 
-from ralph.conf import ClientOwnershipScimSettings
+from ralph.conf import ClientOwnershipScimSettings, settings
 
 # API auth logger
 logger = logging.getLogger(__name__)
 
 
-@lru_cache()
+@cached(
+    cache=TTLCache(maxsize=settings.AUTH_CACHE_MAX_SIZE, ttl=60),
+    lock=Lock(),
+)
 def get_scim_resource_types(
-    scim_resource_types_endpoint: AnyUrl, access_token: str
+    scim_resource_types_endpoint: AnyUrl, auth_header: str
 ) -> Dict:
     """Fetch SCIM `/ResourceTypes` from given endpoint."""
     try:
         response = requests.get(
             f"{scim_resource_types_endpoint}",
-            headers={"Authorization": f"Bearer {access_token}"},
+            headers={"Authorization": auth_header},
             timeout=5,
         )
         response.raise_for_status()
@@ -38,13 +42,16 @@ def get_scim_resource_types(
         ) from exc
 
 
-@lru_cache()
-def get_scim_resource(endpoint: AnyUrl, id: str, access_token: str) -> Dict:
+@cached(
+    cache=TTLCache(maxsize=settings.AUTH_CACHE_MAX_SIZE, ttl=60),
+    lock=Lock(),
+)
+def get_scim_resource(url: AnyUrl, auth_header: str) -> Dict:
     """Get SCIM resource from given endpoint with `resource_id`."""
     try:
         response = requests.get(
-            f"{endpoint}/{id}",
-            headers={"Authorization": f"Bearer {access_token}"},
+            f"{url}",
+            headers={"Authorization": auth_header},
             timeout=5,
         )
         response.raise_for_status()
@@ -62,7 +69,7 @@ def get_scim_resource(endpoint: AnyUrl, id: str, access_token: str) -> Dict:
 def get_user_owned_client_ids(
     user_sub: str,
     client_ownership_config: ClientOwnershipScimSettings,
-    access_token: str,
+    auth_header: str,
 ) -> list[str]:
     """Get the the ids of OIDC clients that are 'owned' by the authenticated user.
 
@@ -73,7 +80,8 @@ def get_user_owned_client_ids(
         user_sub (str): user's OIDC sub (identifier)
         client_ownership_config (ClientOwnershipScimSettings): SCIM 'Client ownership'
                                                       user extension settings
-        access_token (str): OIDC authentication token
+        auth_header (str): OIDC authentication header value.
+                           Must be authorized to access SCIM resources.
 
     Return:
         client_ids (list[str])
@@ -82,16 +90,14 @@ def get_user_owned_client_ids(
         HTTPException
     """
     resource_types = get_scim_resource_types(
-        client_ownership_config.resource_types_endpoint, access_token=access_token
+        client_ownership_config.resource_types_endpoint, auth_header=auth_header
     )
     user_resource_type = resource_types["User"]
-    group_resource_type = resource_types["Group"]
 
     user_endpoint = user_resource_type["endpoint"]
-    group_endpoint = group_resource_type["endpoint"]
 
     scim_user = get_scim_resource(
-        endpoint=user_endpoint, id=user_sub, access_token=access_token
+        url=f"{user_endpoint}/{user_sub}", auth_header=auth_header
     )
     if client_ownership_config.user_extension_schema not in scim_user:
         logger.error(
@@ -125,12 +131,10 @@ def get_user_owned_client_ids(
     client_data = scim_user[client_ownership_config.user_extension_schema]
     client_ids = get_client_ids(client_data)
 
-    scim_group_ids = [group["value"] for group in scim_user["groups"]]
+    scim_group_urls = [group["$ref"] for group in scim_user["groups"]]
 
-    for scim_group_id in scim_group_ids:
-        scim_group = get_scim_resource(
-            endpoint=group_endpoint, id=scim_group_id, access_token=access_token
-        )
+    for scim_group_url in scim_group_urls:
+        scim_group = get_scim_resource(url=scim_group_url, auth_header=auth_header)
         if client_ownership_config.group_extension_schema not in scim_group:
             logger.error(
                 "Unable to get provided schema %s from SCIM group",
