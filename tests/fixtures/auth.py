@@ -4,7 +4,7 @@ import base64
 import json
 import os
 import urllib.parse
-from typing import Literal, Optional
+from typing import Callable, Literal, Optional
 
 import bcrypt
 import pytest
@@ -26,6 +26,20 @@ CLIENT_ID = "my-client-id"
 OTHER_CLIENT_ID = "my-other-client-id"
 CLIENT_SECRET = "my-client-secret"
 PUBLIC_KEY_ID = "example-key-id"
+
+SCIM_BASE_URL = "http://providerHost:8080/scim/v2"
+SCIM_CLIENT_OWNERSHIP_RESOURCE_TYPES_ENDPOINT = f"{SCIM_BASE_URL}/ResourceTypes"
+SCIM_CLIENT_OWNERSHIP_USER_EXTENSION_SCHEMA = (
+    "urn:ietf:params:scim:schemas:extension:client_ownership:2.0:User"
+)
+SCIM_CLIENT_OWNERSHIP_GROUP_EXTENSION_SCHEMA = (
+    "urn:ietf:params:scim:schemas:extension:client_ownership:2.0:Group"
+)
+SCIM_CLIENT_OWNERSHIP_EXTENSION_SCHEMA_JQ_PATH = ".clients.[].value"
+
+
+def client_ids_to_scim_data(client_ids: list[str]) -> list[dict]:
+    return {"clients": [{"value": client_id} for client_id in client_ids]}
 
 
 def mock_basic_auth_user(  # noqa: PLR0913
@@ -240,7 +254,7 @@ def _mock_access_token(sub, scopes, target=None):
     ).decode()
 
 
-def _mock_oidc_token_info(sub, scopes, target=None):
+def _mock_oidc_introspection_response(sub, scopes, target=None):
     """Mock OIDC Token Introspection response with provided params."""
     user_info = {
         "sub": sub,
@@ -258,7 +272,18 @@ def _mock_oidc_token_info(sub, scopes, target=None):
     return user_info
 
 
-def _mock_oidc_user_info_plain(sub, scopes, target=None):
+def _mock_oidc_token_response(access_token, scopes):
+    """Mock OIDC Token response with provided params."""
+    token_data = {
+        "access_token": access_token,
+        "expires_in": 864000,
+        "scope": " ".join(scopes),
+        "token_type": "Bearer",
+    }
+    return token_data
+
+
+def _mock_oidc_user_info_plain_response(sub, scopes, target=None):
     """Mock unencoded OIDC user info claims with provided params."""
     user_info = {
         "sub": sub,
@@ -267,6 +292,55 @@ def _mock_oidc_user_info_plain(sub, scopes, target=None):
     if target is not None:
         user_info["target"] = target
     return user_info
+
+
+def _protect_oidc_client_basic_callback(
+    result: Callable[[dict], tuple] | dict, client_id: str, client_secret: str
+):
+    def _callback(request):
+        auth_header = request.headers["Authorization"]
+        auth_method = auth_header.split(" ")[0]
+        if auth_method.lower() != "basic":
+            return (401, {}, "")
+        client_secret_basic_token = auth_header.split(" ")[-1]
+        decoded_client_secret_basic_token = base64.b64decode(
+            client_secret_basic_token.encode("utf-8")
+        ).decode("utf-8")
+        id = decoded_client_secret_basic_token.split(":")[0]
+        secret = decoded_client_secret_basic_token.split(":")[1]
+        if id != client_id or secret != client_secret:
+            return (401, {}, "")
+        if isinstance(result, Callable):
+            return result(request)
+        return (
+            200,
+            {"Content-Type": "application/json"},
+            json.dumps(result),
+        )
+
+    return _callback
+
+
+def _protect_oidc_token_callback(
+    result: Callable[[dict], tuple] | dict, access_token: str
+):
+    def _callback(request):
+        auth_header = request.headers["Authorization"]
+        auth_method = auth_header.split(" ")[0]
+        if auth_method.lower() != "bearer":
+            return (401, {}, "")
+        token = auth_header.split(" ")[-1]
+        if token != access_token:
+            return (401, {}, "")
+        if isinstance(result, Callable):
+            return result(request)
+        return (
+            200,
+            {"Content-Type": "application/json"},
+            json.dumps(result),
+        )
+
+    return _callback
 
 
 def mock_oidc_user(
@@ -306,43 +380,32 @@ def mock_oidc_user(
     # Mock request to get token info
     def _oidc_introspection_callback(request):
         payload = urllib.parse.parse_qs(request.body)
-        auth_header = request.headers["Authorization"]
-        auth_method = auth_header.split(" ")[0]
-        if auth_method.lower() != "basic":
-            return (401, {}, "")
-        client_secret_basic_token = auth_header.split(" ")[-1]
-        decoded_client_secret_basic_token = base64.b64decode(
-            client_secret_basic_token.encode("utf-8")
-        ).decode("utf-8")
-        client_id = decoded_client_secret_basic_token.split(":")[0]
-        client_secret = decoded_client_secret_basic_token.split(":")[1]
-        if client_id != CLIENT_ID or client_secret != CLIENT_SECRET:
-            return (401, {}, "")
         token = payload["token"][0]
         if token != oidc_access_token:
             return (200, {}, json.dumps({"active": False}))
         return (
             200,
             {},
-            json.dumps(_mock_oidc_token_info(sub=sub, scopes=scopes, target=target)),
+            json.dumps(
+                _mock_oidc_introspection_response(sub=sub, scopes=scopes, target=target)
+            ),
         )
 
     responses.add_callback(
         responses.POST,
         provider_config["introspection_endpoint"],
-        callback=_oidc_introspection_callback,
+        callback=_protect_oidc_client_basic_callback(
+            _oidc_introspection_callback,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+        ),
     )
 
     # Mock request to get ID token
     def _oidc_userinfo_callback(request):
-        auth_header = request.headers["Authorization"]
-        auth_method = auth_header.split(" ")[0]
-        if auth_method.lower() != "bearer":
-            return (401, {}, "")
-        access_token = auth_header.split(" ")[-1]
-        if access_token != oidc_access_token:
-            return (401, {}, "")
-        user_info = _mock_oidc_user_info_plain(sub=sub, scopes=scopes, target=target)
+        user_info = _mock_oidc_user_info_plain_response(
+            sub=sub, scopes=scopes, target=target
+        )
         if userinfo_response_type == "plain":
             return (200, {"Content-Type": "application/json"}, json.dumps(user_info))
         elif userinfo_response_type == "jwt":
@@ -369,7 +432,37 @@ def mock_oidc_user(
     responses.add_callback(
         responses.GET,
         provider_config["userinfo_endpoint"],
-        callback=_oidc_userinfo_callback,
+        callback=_protect_oidc_token_callback(
+            _oidc_userinfo_callback, access_token=oidc_access_token
+        ),
+    )
+
+    # Mock request to get ID token
+    def _oidc_client_credentials_token_callback(request):
+        payload = urllib.parse.parse_qs(request.body)
+        if (
+            "grant_type" not in payload
+            or payload["grant_type"][0] != "client_credentials"
+        ):
+            return (403, {}, "")
+        token_data = _mock_oidc_token_response(
+            access_token=oidc_access_token, scopes=scopes
+        )
+        return (
+            200,
+            {"Content-Type": "application/json"},
+            json.dumps(token_data),
+        )
+
+    # Also mock requests to token endpoint to get client_crendentials access token
+    responses.add_callback(
+        responses.POST,
+        provider_config["token_endpoint"],
+        callback=_protect_oidc_client_basic_callback(
+            _oidc_client_credentials_token_callback,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+        ),
     )
 
     return oidc_access_token
@@ -379,3 +472,183 @@ def mock_oidc_user(
 def access_token():
     """Get opaque OAuth2 access token (fixture)."""
     return _mock_access_token(sub="123|oidc", scopes=["all", "statements/read"])
+
+
+def _mock_scim_resource_types_response():
+    return {
+        "Resources": [
+            {
+                "description": "User accounts",
+                "endpoint": f"{SCIM_BASE_URL}/Users",
+                "id": "User",
+                "meta": {
+                    "location": f"{SCIM_BASE_URL}/ResourceTypes/User",
+                    "resourceType": "ResourceType",
+                },
+                "name": "User",
+                "schema": "urn:ietf:params:scim:schemas:core:2.0:User",
+                "schemaExtensions": [
+                    {
+                        "required": True,
+                        "schema": "urn:ietf:params:scim:schemas:"
+                        "extension:enterprise:2.0:User",
+                    },
+                    {
+                        "required": True,
+                        "schema": SCIM_CLIENT_OWNERSHIP_USER_EXTENSION_SCHEMA,
+                    },
+                ],
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
+            },
+            {
+                "description": "Group management",
+                "endpoint": f"{SCIM_BASE_URL}/Groups",
+                "id": "Group",
+                "meta": {
+                    "location": f"{SCIM_BASE_URL}/ResourceTypes/Group",
+                    "resourceType": "ResourceType",
+                },
+                "name": "Group",
+                "schema": "urn:ietf:params:scim:schemas:core:2.0:Group",
+                "schemaExtensions": [
+                    {
+                        "required": True,
+                        "schema": SCIM_CLIENT_OWNERSHIP_GROUP_EXTENSION_SCHEMA,
+                    }
+                ],
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
+            },
+        ],
+        "itemsPerPage": 2,
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+        "totalResults": 2,
+    }
+
+
+def _mock_scim_user_response(
+    user_sub: str,
+    group_names: Optional[list[str]] = None,
+    client_ids: Optional[list[str]] = None,
+):
+    if group_names is None:
+        group_names = []
+    if client_ids is None:
+        client_ids = []
+    group_data = [
+        {
+            "$ref": f"{SCIM_BASE_URL}/Groups/{group_name}",
+            "display": group_name,
+            "value": "...",
+        }
+        for group_name in group_names
+    ]
+    client_data = client_ids_to_scim_data(client_ids)
+    return {
+        "active": True,
+        "emails": [],
+        "groups": group_data,
+        "id": "...",
+        "meta": {
+            "created": "2026-05-19T09:35:15Z",
+            "lastModified": "2026-05-19T11:29:18Z",
+            "location": f"{SCIM_BASE_URL}/Users/{user_sub}",
+            "resourceType": "User",
+            "version": 'W/"f68d0ddea3d1e2d7"',
+        },
+        "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:User",
+            SCIM_CLIENT_OWNERSHIP_USER_EXTENSION_SCHEMA,
+            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+        ],
+        SCIM_CLIENT_OWNERSHIP_USER_EXTENSION_SCHEMA: client_data,
+        "userName": user_sub,
+    }
+
+
+def _mock_scim_group_response(
+    group_name: str,
+    member_subs: Optional[list[str]] = None,
+    client_ids: Optional[list[str]] = None,
+):
+    if member_subs is None:
+        member_subs = []
+    if client_ids is None:
+        client_ids = []
+    member_data = [
+        {"$ref": f"{SCIM_BASE_URL}/Users/{user_sub}", "value": user_sub}
+        for user_sub in member_subs
+    ]
+    client_data = client_ids_to_scim_data(client_ids)
+    return {
+        "displayName": group_name,
+        "id": "...",
+        "members": member_data,
+        "meta": {
+            "created": "2026-05-19T09:34:52Z",
+            "lastModified": "2026-05-19T09:34:52Z",
+            "location": f"{SCIM_BASE_URL}/Groups/{group_name}",
+            "resourceType": "Group",
+            "version": 'W/"8f29b4be01573138"',
+        },
+        "schemas": [
+            "urn:ietf:params:scim:schemas:core:2.0:Group",
+            SCIM_CLIENT_OWNERSHIP_GROUP_EXTENSION_SCHEMA,
+        ],
+        SCIM_CLIENT_OWNERSHIP_GROUP_EXTENSION_SCHEMA: client_data,
+    }
+
+
+def mock_scim_server(
+    access_token,
+    user_sub,
+    user_client_ids: Optional[list[str]] = None,
+    group_name: Optional[str] = None,
+    group_client_ids: Optional[list[str]] = None,
+):
+    """Instantiate mock oidc user and return auth token."""
+
+    if user_client_ids is None:
+        user_client_ids = []
+    if group_client_ids is None:
+        group_client_ids = []
+    # Clear LRU cache
+    discover_provider.cache_clear()
+    get_public_keys.cache_clear()
+
+    resource_types = _mock_scim_resource_types_response()
+    # Mock request to get /ResourceTypes
+    responses.add_callback(
+        responses.GET,
+        f"{SCIM_CLIENT_OWNERSHIP_RESOURCE_TYPES_ENDPOINT}",
+        callback=_protect_oidc_token_callback(
+            resource_types, access_token=access_token
+        ),
+    )
+
+    # Mock request to get User
+    responses.add_callback(
+        responses.GET,
+        f"{SCIM_BASE_URL}/Users/{user_sub}",
+        callback=_protect_oidc_token_callback(
+            _mock_scim_user_response(
+                user_sub=user_sub,
+                group_names=[group_name] if group_name is not None else [],
+                client_ids=user_client_ids,
+            ),
+            access_token=access_token,
+        ),
+    )
+    if group_name is not None:
+        # Mock request to get User
+        responses.add_callback(
+            responses.GET,
+            f"{SCIM_BASE_URL}/Groups/{group_name}",
+            callback=_protect_oidc_token_callback(
+                _mock_scim_group_response(
+                    group_name=group_name,
+                    member_subs=[user_sub],
+                    client_ids=group_client_ids,
+                ),
+                access_token=access_token,
+            ),
+        )
