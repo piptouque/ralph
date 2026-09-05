@@ -17,6 +17,8 @@ and this project adheres to
   - Requires LRS_RESTRICT_BY_AUTHORITY (would not have any effect otherwise)
   - Done using SCIM calls via the provided endpoint and schemas (conf values)
   - Add 'Client agents' info to `/whoami` endpoint when it is enabled
+- API: allow users with new `authority/write` scope to override authority
+       when PUTting or POSTing statements
 
 ### Removed
 
