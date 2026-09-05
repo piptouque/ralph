@@ -286,6 +286,36 @@ def get_client_basic_auth_header(client_id: str, client_secret: str) -> str:
     ),
     lock=Lock(),
 )
+def get_client_credentials_auth_header(
+    token_endpoint: AnyUrl, client_basic_auth_header: str
+) -> str:
+    """Authenticate to IdP as Ralph using ClientCredentials flow."""
+    try:
+        response = requests.post(
+            f"{token_endpoint}",
+            headers={"Authorization": client_basic_auth_header},
+            data={"grant_type": "client_credentials"},
+            timeout=5,
+        )
+        response.raise_for_status()
+        token_data = response.json()
+    except requests.exceptions.RequestException as exc:
+        logger.error("Unable to get client_credentials auth token: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    return token_data["token_type"] + " " + token_data["access_token"]
+
+
+@lru_cache()
+@cached(
+    cache=TTLCache(
+        maxsize=settings.AUTH_CACHE_MAX_SIZE, ttl=settings.AUTH_OIDC_CACHE_TTL
+    ),
+    lock=Lock(),
+)
 def get_token_introspection(
     introspection_endpoint: AnyUrl, token: str, client_basic_auth_header: str
 ) -> TokenIntrospection:
@@ -407,7 +437,6 @@ def get_oidc_user(
         client_id=settings.RUNSERVER_AUTH_OIDC_CLIENT_ID,
         client_secret=settings.RUNSERVER_AUTH_OIDC_CLIENT_SECRET,
     )
-
     token_info = get_token_introspection(
         provider_config["introspection_endpoint"],
         token=access_token,
@@ -432,10 +461,18 @@ def get_oidc_user(
         client_agents = None
         if settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP:
             try:
+                client_credentials_auth_header = get_client_credentials_auth_header(
+                    token_endpoint=provider_config["token_endpoint"],
+                    client_basic_auth_header=client_basic_auth_header,
+                )
+                # NOTE: must have authorisation for performing SCIM operations.
+                #       the most convenient way to do that is to authorise Ralph
+                #       to perform the operations, instead of the user.
+                #       so we reuse the ClientCredentials auth_header.
                 client_ids = scim.get_user_owned_client_ids(
                     user_sub=user_info.sub,
                     client_ownership_config=settings.RUNSERVER_SCIM_CLIENT_OWNERSHIP,
-                    access_token=access_token,
+                    auth_header=client_credentials_auth_header,
                 )
                 client_agents = [
                     AuthenticatedOidcClient.get_agent(iss=token_info.iss, client_id=client_id)
