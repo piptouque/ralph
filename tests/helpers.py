@@ -129,12 +129,13 @@ def mock_agent(
     raise ValueError("No valid ifi was provided to mock_agent")
 
 
-def mock_statement(
+def mock_statement(  # noqa: PLR0913
     id_: Optional[Union[UUID, int]] = None,
     actor: Optional[Union[dict, int]] = None,
     verb: Optional[Union[dict, int]] = None,
     object: Optional[Union[dict, int]] = None,
     timestamp: Optional[Union[str, int]] = None,
+    authority: Optional[Union[dict, int]] = None,
 ):
     """Generate fake statements with random or provided parameters.
 
@@ -159,6 +160,12 @@ def mock_statement(
         actor = mock_agent()
     elif isinstance(actor, int):
         actor = mock_agent(id_=actor)
+
+    # Authority
+    if authority is None:
+        authority = mock_agent()
+    elif isinstance(authority, int):
+        authority = mock_agent(id_=authority)
 
     # Verb
     if verb is None:
@@ -206,6 +213,7 @@ def mock_statement(
         "verb": verb,
         "object": object,
         "timestamp": timestamp,
+        "authority": authority,
     }
 
 

@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- API: allow users with new `authority/write` scope to override authority
+       when PUTting or POSTing statements
+
 ### Removed
 
 - Drop support for Python 3.8
