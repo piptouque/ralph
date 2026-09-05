@@ -20,7 +20,11 @@ from tests.helpers import (
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "runserver_auth_backends,userinfo_response_type",
-    [([AuthBackend.BASIC, AuthBackend.OIDC], "jwt"), ([AuthBackend.OIDC], "plain"), ([AuthBackend.OIDC], "jwt")],
+    [
+        ([AuthBackend.BASIC, AuthBackend.OIDC], "jwt"),
+        ([AuthBackend.OIDC], "plain"),
+        ([AuthBackend.OIDC], "jwt"),
+    ],
 )
 @responses.activate
 async def test_api_auth_oidc_get_whoami_valid(
@@ -30,7 +34,9 @@ async def test_api_auth_oidc_get_whoami_valid(
 
     configure_env_for_mock_oidc_auth(monkeypatch, runserver_auth_backends)
 
-    oidc_token = mock_oidc_user(scopes=["all", "profile/read"], userinfo_response_type=userinfo_response_type)
+    oidc_token = mock_oidc_user(
+        scopes=["all", "profile/read"], userinfo_response_type=userinfo_response_type
+    )
 
     headers = {"Authorization": f"Bearer {oidc_token}"}
     response = await client.get(
@@ -53,7 +59,11 @@ async def test_api_auth_oidc_get_whoami_valid(
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "runserver_auth_backends,userinfo_response_type",
-    [([AuthBackend.BASIC, AuthBackend.OIDC], "jwt"), ([AuthBackend.OIDC], "plain"), ([AuthBackend.OIDC], "jwt")],
+    [
+        ([AuthBackend.BASIC, AuthBackend.OIDC], "jwt"),
+        ([AuthBackend.OIDC], "plain"),
+        ([AuthBackend.OIDC], "jwt"),
+    ],
 )
 @responses.activate
 async def test_api_auth_oidc_post_statements_to_target(
@@ -65,7 +75,11 @@ async def test_api_auth_oidc_post_statements_to_target(
 
     # Create user pointing to a custom target
     target = "custom_target"
-    oidc_token = mock_oidc_user(scopes=["all", "profile/read"], target=target, userinfo_response_type=userinfo_response_type)
+    oidc_token = mock_oidc_user(
+        scopes=["all", "profile/read"],
+        target=target,
+        userinfo_response_type=userinfo_response_type,
+    )
 
     monkeypatch.setattr(
         "ralph.api.routers.statements.BACKEND_CLIENT", get_es_test_backend()
@@ -107,7 +121,7 @@ async def test_api_auth_oidc_post_statements_to_target(
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "userinfo_response_type",
-    ["jwt","plain"],
+    ["jwt", "plain"],
 )
 @responses.activate
 async def test_api_auth_oidc_get_whoami_invalid_token(
