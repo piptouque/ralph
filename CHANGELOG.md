@@ -12,6 +12,8 @@ and this project adheres to
 
 - API: support for CORS request
 - Backends: (internal) add support for multiple authority queries
+- API: allow users with new `authority/write` scope to override authority
+       when PUTting or POSTing statements
 
 ### Removed
 
