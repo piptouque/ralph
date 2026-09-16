@@ -11,6 +11,7 @@ from ralph.backends.data.clickhouse import (
     ClickHouseDataBackendSettings,
 )
 from ralph.backends.lrs.base import (
+    RELATED_AGENTS_FIELDS,
     AgentParameters,
     BaseLRSBackend,
     BaseLRSBackendSettings,
@@ -59,7 +60,10 @@ class ClickHouseLRSBackend(
         if params.statement_id:
             where.append("event_id = {statementId:UUID}")
 
-        self._add_agent_filters(ch_params, where, params.agent, "actor")
+        if params.related_agents:
+            self._add_related_agent_filters(ch_params, where, params.agent)
+        else:
+            self._add_agent_filters(ch_params, where, params.agent, "actor")
         ch_params.pop("agent", None)
 
         self._add_agent_filters(ch_params, where, params.authority, "authority")
@@ -160,79 +164,92 @@ class ClickHouseLRSBackend(
             raise error
 
     @staticmethod
+    def _get_agent_filters(
+        agent_params: AgentParameters,
+        target_field: Union[str, tuple[str, ...]],
+        idx: Optional[int] = None,
+    ) -> Union[tuple[list[str], dict], None]:
+        if not agent_params:
+            return None
+
+        if not isinstance(agent_params, dict):
+            agent_params = agent_params.model_dump()
+
+        if isinstance(target_field, str):
+            extract_string_field = f"'{target_field}'"
+            param_field = target_field
+        else:
+            extract_string_field = ", ".join([f"'{part}'" for part in target_field])
+            param_field = "__".join(target_field)
+        param_field = f"{param_field}_{idx}" if idx is not None else param_field
+
+        if agent_params.get("mbox"):
+            return (
+                [
+                    f"JSONExtractString(event, {extract_string_field}, 'mbox') = "
+                    f"{{{param_field}__mbox:String}}"
+                ],
+                {f"{param_field}__mbox": agent_params.get("mbox")},
+            )
+        elif agent_params.get("mbox_sha1sum"):
+            return (
+                [
+                    f"JSONExtractString(event, {extract_string_field},"
+                    f" 'mbox_sha1sum') = "
+                    f"{{{param_field}__mbox_sha1sum:String}}"
+                ],
+                {f"{param_field}__mbox_sha1sum": agent_params.get("mbox_sha1sum")},
+            )
+        elif agent_params.get("openid"):
+            return (
+                [
+                    f"JSONExtractString(event, {extract_string_field}, 'openid') = "
+                    f"{{{param_field}__openid:String}}"
+                ],
+                {f"{param_field}__openid": agent_params.get("openid")},
+            )
+        elif agent_params.get("account__name"):
+            return (
+                [
+                    f"JSONExtractString(event, {extract_string_field}, 'account',"
+                    f" 'name') = "
+                    f"{{{param_field}__account__name:String}}",
+                    f"JSONExtractString(event, {extract_string_field}, 'account',"
+                    f" 'homePage') = "
+                    f"{{{param_field}__account__home_page:String}}",
+                ],
+                {
+                    f"{param_field}__account__name": agent_params.get("account__name"),
+                    f"{param_field}__account__home_page": agent_params.get(
+                        "account__home_page"
+                    ),
+                },
+            )
+
+    @classmethod
     def _add_agent_filters(
+        cls,
         ch_params: dict,
         where: list,
         agent_params: Union[AgentParameters, list[AgentParameters]],
-        target_field: str,
+        target_field: Union[str, tuple[str, ...]],
     ) -> None:
         """Add filters relative to agents to `where`."""
-
-        def _get_agent_filters(
-            _params: AgentParameters, idx: Optional[int] = None
-        ) -> Union[tuple[list[str], dict], None]:
-            if not _params:
-                return None
-
-            if not isinstance(_params, dict):
-                _params = _params.model_dump()
-
-            target_param = f"{target_field}_{idx}" if idx is not None else target_field
-
-            if _params.get("mbox"):
-                return (
-                    [
-                        f"JSONExtractString(event, '{target_field}', 'mbox') = "
-                        f"{{{target_param}__mbox:String}}"
-                    ],
-                    {f"{target_param}__mbox": _params.get("mbox")},
-                )
-            elif _params.get("mbox_sha1sum"):
-                return (
-                    [
-                        f"JSONExtractString(event, '{target_field}', 'mbox_sha1sum') = "
-                        f"{{{target_param}__mbox_sha1sum:String}}"
-                    ],
-                    {f"{target_param}__mbox_sha1sum": _params.get("mbox_sha1sum")},
-                )
-            elif _params.get("openid"):
-                return (
-                    [
-                        f"JSONExtractString(event, '{target_field}', 'openid') = "
-                        f"{{{target_param}__openid:String}}"
-                    ],
-                    {f"{target_param}__openid": _params.get("openid")},
-                )
-            elif _params.get("account__name"):
-                return (
-                    [
-                        f"JSONExtractString(event, '{target_field}', 'account',"
-                        f" 'name') = "
-                        f"{{{target_param}__account__name:String}}",
-                        f"JSONExtractString(event, '{target_field}', 'account',"
-                        f" 'homePage') = "
-                        f"{{{target_param}__account__home_page:String}}",
-                    ],
-                    {
-                        f"{target_param}__account__name": _params.get("account__name"),
-                        f"{target_param}__account__home_page": _params.get(
-                            "account__home_page"
-                        ),
-                    },
-                )
-            return None
-
         if not agent_params:
             return
         elif not isinstance(agent_params, list):
-            filters = _get_agent_filters(agent_params)
+            filters = cls._get_agent_filters(
+                agent_params=agent_params, target_field=target_field
+            )
             if filters:
                 _where, _ch_params = filters
                 ch_params.update(_ch_params)
                 where.extend(_where)
         else:
             filters = [
-                _get_agent_filters(params, idx=idx)
+                cls._get_agent_filters(
+                    agent_params=params, target_field=target_field, idx=idx
+                )
                 for idx, params in enumerate(agent_params)
                 if params
             ]
@@ -240,3 +257,28 @@ class ClickHouseLRSBackend(
             _where = [" OR ".join([" AND ".join(el[0]) for el in filters])]
             ch_params.update(_ch_params)
             where.extend(_where)
+
+    @classmethod
+    def _add_related_agent_filters(
+        cls,
+        ch_params: dict,
+        where: list,
+        agent_params: AgentParameters,
+    ) -> None:
+        """Add filters relative to agents to `where`, including any 'related agents'."""
+        if not agent_params:
+            return
+
+        related_where = []
+        for field in RELATED_AGENTS_FIELDS:
+            field_where = []
+            cls._add_agent_filters(
+                ch_params=ch_params,
+                where=field_where,
+                agent_params=agent_params,
+                target_field=field,
+            )
+            if len(field_where) > 0:
+                related_where.append(" AND ".join(field_where))
+        if len(related_where) > 0:
+            where.append(" OR ".join(related_where))

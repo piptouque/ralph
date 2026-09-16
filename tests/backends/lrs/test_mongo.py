@@ -126,8 +126,12 @@ def test_backends_lrs_mongo_default_instantiation(monkeypatch, fs):
             {
                 "filter": {
                     "_source.id": "statementId",
-                    "_source.actor.account.name": "13936749",
-                    "_source.actor.account.homePage": "http://www.example.com",
+                    "$and": [
+                        {"_source.actor.account.name": "13936749"},
+                        {
+                            "_source.actor.account.homePage": "http://www.example.com",
+                        },
+                    ],
                 },
                 "limit": 0,
                 "projection": None,
@@ -243,7 +247,7 @@ def test_backends_lrs_mongo_default_instantiation(monkeypatch, fs):
                 ],
             },
         ),
-        # 11. Query by multiple authority (OR) with openid IFI.
+        # 12. Query by multiple authority (OR) with openid IFI.
         (
             {
                 "statementId": "statementId",
@@ -268,33 +272,162 @@ def test_backends_lrs_mongo_default_instantiation(monkeypatch, fs):
                 ],
             },
         ),
+        # 13. Query agent with account IFI with related_agents.
         (
             {
-                "statementId": "62b9ce922c26b46b68ffc68f",
                 "agent": {
-                    "account__name": "test_name",
-                    "account__home_page": "http://example.com",
+                    "account__name": "13936749",
+                    "account__home_page": "http://www.example.com",
                 },
-                "verb": "https://xapi-example.com/verb-id",
-                "activity": "http://example.com",
-                "since": "2020-01-01T00:00:00.000000+00:00",
-                "until": "2022-12-01T15:36:50",
+                "related_agents": True,
             },
             {
                 "filter": {
-                    "_source.id": "62b9ce922c26b46b68ffc68f",
-                    "_source.actor.account.name": "test_name",
-                    "_source.actor.account.homePage": "http://example.com",
-                    "_source.verb.id": "https://xapi-example.com/verb-id",
-                    "_source.object.id": "http://example.com",
-                    "_source.timestamp": {
-                        "$gt": "2020-01-01T00:00:00.000000+00:00",
-                        "$lte": "2022-12-01T15:36:50",
-                    },
+                    "$or": [
+                        {
+                            "$and": [
+                                {
+                                    "_source.actor.account.name": "13936749",
+                                },
+                                {
+                                    "_source.actor.account.homePage": "http://www.example.com",
+                                },
+                            ]
+                        },
+                        {
+                            "$and": [
+                                {
+                                    "_source.object.account.name": "13936749",
+                                },
+                                {
+                                    "_source.object.account.homePage": "http://www.example.com",
+                                },
+                            ]
+                        },
+                        {
+                            "$and": [
+                                {
+                                    "_source.authority.account.name": "13936749",
+                                },
+                                {
+                                    "_source.authority.account.homePage": "http://www.example.com",
+                                },
+                            ]
+                        },
+                        {
+                            "$and": [
+                                {
+                                    "_source.context.instructor.account.name": "13936749",  # noqa: E501
+                                },
+                                {
+                                    "_source.context.instructor.account.homePage": "http://www.example.com",
+                                },
+                            ]
+                        },
+                        {
+                            "$and": [
+                                {
+                                    "_source.context.team.account.name": "13936749",
+                                },
+                                {
+                                    "_source.context.team.account.homePage": "http://www.example.com",
+                                },
+                            ]
+                        },
+                        {
+                            "$and": [
+                                {
+                                    "_source.object.actor.account.name": "13936749",
+                                },
+                                {
+                                    "_source.object.actor.account.homePage": "http://www.example.com",
+                                },
+                            ]
+                        },
+                        {
+                            "$and": [
+                                {
+                                    "_source.object.object.account.name": "13936749",
+                                },
+                                {
+                                    "_source.object.object.account.homePage": "http://www.example.com",
+                                },
+                            ]
+                        },
+                        {
+                            "$and": [
+                                {
+                                    "_source.object.context.instructor.account.name": "13936749",  # noqa: E501
+                                },
+                                {
+                                    "_source.object.context.instructor.account.homePage": "http://www.example.com",  # noqa: E501
+                                },
+                            ]
+                        },
+                        {
+                            "$and": [
+                                {
+                                    "_source.object.context.team.account.name": "13936749",  # noqa: E501
+                                },
+                                {
+                                    "_source.object.context.team.account.homePage": "http://www.example.com",
+                                },
+                            ]
+                        },
+                    ]
                 },
                 "limit": 0,
                 "projection": None,
-                "sort": [("_source.timestamp", DESCENDING), ("_id", DESCENDING)],
+                "sort": [
+                    ("_source.timestamp", DESCENDING),
+                    ("_id", DESCENDING),
+                ],
+            },
+        ),
+        # 12. Query agent with openid IFI with related_agents.
+        (
+            {
+                "agent": {"openid": "http://toby.openid.example.org/"},
+                "related_agents": True,
+            },
+            {
+                "filter": {
+                    "$or": [
+                        {
+                            "_source.actor.openid": "http://toby.openid.example.org/",
+                        },
+                        {
+                            "_source.object.openid": "http://toby.openid.example.org/",
+                        },
+                        {
+                            "_source.authority.openid": "http://toby.openid.example.org/",
+                        },
+                        {
+                            "_source.context.instructor.openid": "http://toby.openid.example.org/",
+                        },
+                        {
+                            "_source.context.team.openid": "http://toby.openid.example.org/",
+                        },
+                        {
+                            "_source.object.actor.openid": "http://toby.openid.example.org/",
+                        },
+                        {
+                            "_source.object.object.openid": "http://toby.openid.example.org/",
+                        },
+                        {
+                            "_source.object.context.instructor.openid": "http://toby.openid.example.org/",
+                        },
+                        {
+                            "_source.object.context.team.openid": "http://toby.openid.example.org/",
+                        },
+                    ]
+                },
+                "limit": 0,
+                "projection": None,
+                "sort": [
+                    ("_source.timestamp", DESCENDING),
+                    ("_id", DESCENDING),
+                ],
             },
         ),
     ],
