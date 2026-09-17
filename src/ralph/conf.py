@@ -183,25 +183,25 @@ class ClientAccessScimSettings(BaseModel):
 
     resource_types_endpoint: AnyHttpUrl = Field(
         title="SCIM `/ResourceTypes` endpoint",
-        description="Required if authority is extended to include OIDC Client"
-        "the user has access to.",
     )
     user_extension_schema: Annotated[
         str, AfterValidator(validate_scim_extension_urn)
     ] = Field(
         title="SCIM 'Client Access' User extension schema",
-        description="Required if authority is extended to include OIDC Client"
-        "the user has access to.",
     )
-    extension_schema_jq_path: Annotated[str, AfterValidator(validate_jq_expression)] = (
-        Field(
-            title="SCIM 'Client Access' User extension schema path"
-            "to `client_ids` (jq path)",
-            description="Path to `client_ids` (list) in SCIM User Extension"
-            "response. "
-            "Required if authority is extended to include OIDC Client"
-            "the user has access to.",
-        )
+    client_id_jq_path: Annotated[str, AfterValidator(validate_jq_expression)] = Field(
+        title="SCIM 'Client Access' User extension schema path"
+        "to `client_ids` (jq path)",
+        description="Path to `client_ids` (list) in SCIM User Extension" "response.",
+    )
+    client_name_jq_path: Annotated[
+        Optional[str], AfterValidator(validate_jq_expression)
+    ] = Field(
+        title="SCIM 'Client Access' User extension schema path"
+        "to `client_name` (jq path)",
+        description="(Optional) Path to `client_name` (list) in SCIM User Extension"
+        "response.",
+        default=None,
     )
 
 

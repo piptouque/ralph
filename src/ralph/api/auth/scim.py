@@ -2,18 +2,25 @@
 
 import logging
 from threading import Lock
-from typing import Dict
+from typing import Dict, Optional
 
 import jq
 import requests
 from cachetools import TTLCache, cached
 from fastapi import HTTPException, status
-from pydantic import AnyUrl
+from pydantic import AnyUrl, BaseModel, ValidationError
 
 from ralph.conf import ClientAccessScimSettings, settings
 
 # API auth logger
 logger = logging.getLogger(__name__)
+
+
+class ClientData(BaseModel):
+    """Client data fetched from SCIM 'Client Access' Extension."""
+
+    client_id: str
+    name: Optional[str]
 
 
 @cached(
@@ -66,11 +73,11 @@ def get_scim_resource(url: AnyUrl, auth_header: str) -> Dict:
         ) from exc
 
 
-def get_user_owned_client_ids(
+def get_user_accessible_clients(
     user_sub: str,
     client_access_config: ClientAccessScimSettings,
     auth_header: str,
-) -> list[str]:
+) -> list[ClientData]:
     """Get the the ids of OIDC clients that are 'owned' by the authenticated user.
 
     An authenticated user also 'owns' any clients 'owned'
@@ -110,25 +117,57 @@ def get_user_owned_client_ids(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    def get_client_ids(client_data: dict) -> str:
-        try:
+    def get_client_ids(data: dict) -> list[str]:
+        return (
+            jq.compile(client_access_config.client_id_jq_path).input_value(data).all()
+        )
+
+    def get_client_names(data: dict, client_ids: list[str]) -> list[Optional[str]]:
+        if client_access_config.client_name_jq_path:
             return (
-                jq.compile(client_access_config.extension_schema_jq_path)
-                .input_value(client_data)
+                jq.compile(client_access_config.client_name_jq_path)
+                .input_value(data)
                 .all()
             )
-        except ValueError:
-            logger.error(
-                "Input data did not adhere to jq schema `%s`",
-                client_access_config.extension_schema_jq_path,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from None
+        else:
+            return [None] * len(client_ids)
 
-    client_data = scim_user[client_access_config.user_extension_schema]
-    client_ids = get_client_ids(client_data)
+    data = scim_user[client_access_config.user_extension_schema]
+    client_ids = None
+    try:
+        client_ids = get_client_ids(data)
+    except ValueError:
+        logger.error(
+            "Input data did not adhere to `client_id` jq schema `%s`",
+            client_access_config.client_id_jq_path,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from None
+    client_names = None
+    try:
+        client_names = get_client_names(data, client_ids=client_ids)
+    except ValueError:
+        logger.warning(
+            "Input data did not adhere to `client_name` jq schema `%s`",
+            client_access_config.client_name_jq_path,
+        )
+        client_names = [None] * len(client_ids)
 
-    return client_ids
+    try:
+        client_data = [
+            ClientData(client_id=client_id, name=client_name if client_name else None)
+            for client_id, client_name in zip(client_ids, client_names)
+        ]
+        return client_data
+    except ValidationError as e:
+        logger.error(
+            "Client data validation failed",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from e
