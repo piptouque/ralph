@@ -33,11 +33,17 @@ SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT = f"{SCIM_BASE_URL}/ResourceTypes"
 SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA = (
     "urn:ietf:params:scim:schemas:extension:client_access:2.0:User"
 )
-SCIM_CLIENT_ACCESS_EXTENSION_SCHEMA_JQ_PATH = ".clients.[].value"
+SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH = ".clients.[].value"
+SCIM_CLIENT_ACCESS_CLIENT_NAME_JQ_PATH = ".clients.[].display"
 
 
-def client_ids_to_scim_data(client_ids: list[str]) -> list[dict]:
-    return {"clients": [{"value": client_id} for client_id in client_ids]}
+def client_data_to_scim_data(client_data: list[dict]) -> list[dict]:
+    return {
+        "clients": [
+            {"value": client["client_id"], "display": client.get("name")}
+            for client in client_data
+        ]
+    }
 
 
 def mock_basic_auth_user(  # noqa: PLR0913
@@ -568,12 +574,12 @@ def _mock_scim_resource_types_response():
 def _mock_scim_user_response(
     user_sub: str,
     group_names: Optional[list[str]] = None,
-    client_ids: Optional[list[str]] = None,
+    client_data: Optional[list[dict]] = None,
 ):
     if group_names is None:
         group_names = []
-    if client_ids is None:
-        client_ids = []
+    if client_data is None:
+        client_data = []
     group_data = [
         {
             "$ref": f"{SCIM_BASE_URL}/Groups/{group_name}",
@@ -582,7 +588,7 @@ def _mock_scim_user_response(
         }
         for group_name in group_names
     ]
-    client_data = client_ids_to_scim_data(client_ids)
+    scim_client_data = client_data_to_scim_data(client_data)
     return {
         "active": True,
         "emails": [],
@@ -600,7 +606,7 @@ def _mock_scim_user_response(
             SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
             "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
         ],
-        SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA: client_data,
+        SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA: scim_client_data,
         "userName": user_sub,
     }
 
@@ -608,16 +614,16 @@ def _mock_scim_user_response(
 def mock_scim_server(
     access_token,
     user_sub,
-    user_client_ids: Optional[list[str]] = None,
+    user_client_data: Optional[list[dict]] = None,
     group_name: Optional[str] = None,
-    group_client_ids: Optional[list[str]] = None,
+    group_client_data: Optional[list[dict]] = None,
 ):
     """Instantiate mock oidc user and return auth token."""
 
-    if user_client_ids is None:
-        user_client_ids = []
-    if group_client_ids is None:
-        group_client_ids = []
+    if user_client_data is None:
+        user_client_data = []
+    if group_client_data is None:
+        group_client_data = []
     # Clear LRU cache
     discover_provider.cache_clear()
     get_public_keys.cache_clear()
@@ -638,7 +644,7 @@ def mock_scim_server(
             _mock_scim_user_response(
                 user_sub=user_sub,
                 group_names=[group_name] if group_name is not None else [],
-                client_ids=user_client_ids + group_client_ids,
+                client_data=user_client_data + group_client_data,
             ),
             access_token=access_token,
         ),
