@@ -12,7 +12,7 @@ from ralph.conf import ClientAccessScimSettings
 from ralph.models.xapi.base.agents import BaseXapiAgentWithOpenId
 
 from tests.fixtures.auth import (
-    SCIM_CLIENT_ACCESS_EXTENSION_SCHEMA_JQ_PATH,
+    SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH,
     SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT,
     SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
     mock_oidc_user,
@@ -68,9 +68,12 @@ async def test_api_auth_oidc_scim_get_whoami_valid_clients(client, monkeypatch):
     user_sub = "a_user"
     oidc_token = mock_oidc_user(sub=user_sub)
 
-    user_client_ids = ["test_client_1", "test_client_2"]
+    user_client_data = [
+        {"client_id": "test_client_1", "name": "Test Client 1"},
+        {"client_id": "test_client_2"},
+    ]
     mock_scim_server(
-        user_sub=user_sub, user_client_ids=user_client_ids, access_token=oidc_token
+        user_sub=user_sub, user_client_data=user_client_data, access_token=oidc_token
     )
 
     headers = {"Authorization": f"Bearer {oidc_token}"}
@@ -85,7 +88,7 @@ async def test_api_auth_oidc_scim_get_whoami_valid_clients(client, monkeypatch):
         {
             "openid": "https://iss.example.com/application/test_client_1",
             "objectType": "Agent",
-            "name": None,
+            "name": "Test Client 1",
         },
         {
             "openid": "https://iss.example.com/application/test_client_2",
@@ -115,15 +118,15 @@ async def test_api_auth_oidc_scim_get_whoami_valid_group_clients(client, monkeyp
     oidc_token = mock_oidc_user(sub=user_sub)
 
     group_name = "a_group"
-    client_ids = ["test_client_1"]
-    group_client_ids = ["test_client_3"]
+    client_data = [{"client_id": "test_client_1", "name": "Test Client 1"}]
+    group_client_data = [{"client_id": "test_client_3"}]
 
     mock_scim_server(
         access_token=oidc_token,
         user_sub=user_sub,
         group_name=group_name,
-        user_client_ids=client_ids,
-        group_client_ids=group_client_ids,
+        user_client_data=client_data,
+        group_client_data=group_client_data,
     )
 
     headers = {"Authorization": f"Bearer {oidc_token}"}
@@ -138,7 +141,7 @@ async def test_api_auth_oidc_scim_get_whoami_valid_group_clients(client, monkeyp
         {
             "openid": "https://iss.example.com/application/test_client_1",
             "objectType": "Agent",
-            "name": None,
+            "name": "Test Client 1",
         },
         {
             "openid": "https://iss.example.com/application/test_client_3",
@@ -170,7 +173,7 @@ async def test_api_auth_oidc_scim_get_whoami_invalid_config(client, monkeypatch)
     invalid_scim_config = ClientAccessScimSettings(
         resource_types_endpoint=SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT,
         user_extension_schema=SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
-        extension_schema_jq_path=SCIM_CLIENT_ACCESS_EXTENSION_SCHEMA_JQ_PATH + ".nope",
+        client_id_jq_path=SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH + ".nope",
     )
     monkeypatch.setattr(
         "ralph.api.auth.settings.RUNSERVER_SCIM_CLIENT_ACCESS", invalid_scim_config
@@ -179,12 +182,12 @@ async def test_api_auth_oidc_scim_get_whoami_invalid_config(client, monkeypatch)
     user_sub = "a_user"
     oidc_token = mock_oidc_user(sub=user_sub)
 
-    client_ids = ["test_client_1"]
+    client_data = [{"client_id": "test_client_1"}]
 
     mock_scim_server(
         access_token=oidc_token,
         user_sub=user_sub,
-        user_client_ids=client_ids,
+        user_client_data=client_data,
     )
 
     headers = {"Authorization": f"Bearer {oidc_token}"}
