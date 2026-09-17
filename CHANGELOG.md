@@ -49,6 +49,7 @@ and this project adheres to
 - Fix error with OIDC scopes unrelated to Ralph
 - Fix oidc test `test_api_auth_oidc_get_whoami_invalid_backend`
   being misconfigured
+- Fix Ralph returning 500 errors on query parameter validation errors
 
 ### Changed
 
