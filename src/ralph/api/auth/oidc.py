@@ -105,6 +105,7 @@ class AuthenticatedOidcClient(AuthenticatedUser):
 
     @classmethod
     def get_agent(cls, iss: str, client_id: str) -> BaseXapiAgentWithOpenId:
+        """Get Agent data from provided client info."""
         return BaseXapiAgentWithOpenId(openid=f"{iss}/application/{client_id}")
 
     @classmethod
@@ -136,7 +137,9 @@ class AuthenticatedOidcUser(AuthenticatedUser):
 
     @classmethod
     def get_agent(cls, iss: str, sub: str) -> BaseXapiAgentWithOpenId:
+        """Get Agent data from provided user info."""
         return BaseXapiAgentWithOpenId(openid=f"{iss}/{sub}")
+
     @classmethod
     def make(
         cls,
@@ -459,7 +462,7 @@ def get_oidc_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         client_agents = None
-        if settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP:
+        if settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS:
             try:
                 client_credentials_auth_header = get_client_credentials_auth_header(
                     token_endpoint=provider_config["token_endpoint"],
@@ -471,11 +474,13 @@ def get_oidc_user(
                 #       so we reuse the ClientCredentials auth_header.
                 client_ids = scim.get_user_owned_client_ids(
                     user_sub=user_info.sub,
-                    client_ownership_config=settings.RUNSERVER_SCIM_CLIENT_OWNERSHIP,
+                    client_access_config=settings.RUNSERVER_SCIM_CLIENT_ACCESS,
                     auth_header=client_credentials_auth_header,
                 )
                 client_agents = [
-                    AuthenticatedOidcClient.get_agent(iss=token_info.iss, client_id=client_id)
+                    AuthenticatedOidcClient.get_agent(
+                        iss=token_info.iss, client_id=client_id
+                    )
                     for client_id in client_ids
                 ]
             except HTTPException:

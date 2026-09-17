@@ -407,13 +407,10 @@ async def get(  # noqa: PLR0912, PLR0913
     if mine:
         filtering_agents = [current_user.agent]
         if (
-            settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP
+            settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS
             and isinstance(current_user, AuthenticatedOidcUser)
             and current_user.client_agents is not None
         ):
-            # If filtering by ownership,
-            # Filter by any authority that this user has access to:
-            # That is, their own, and that of any OIDC client they own.
             filtering_agents += current_user.client_agents
         query_params["authority"] = [
             _parse_agent_parameters(agent.model_dump(mode="json")).model_dump(
