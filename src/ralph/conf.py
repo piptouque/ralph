@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
+import jq
 from pydantic import (
     AfterValidator,
     AnyHttpUrl,
@@ -157,6 +158,53 @@ AuthBackends = Annotated[
     Union[str, Tuple[str, ...], List[str]], AfterValidator(validate_auth_backends)
 ]
 
+
+def validate_jq_expression(value: str) -> str:
+    """Check that the value gets compiled by jq without error."""
+    _ = jq.compile(value)
+    return value
+
+
+def validate_scim_extension_urn(value: str) -> str:
+    """Incomplete check for SCIM schema extension URNs.
+
+    Should be enough for this use case.
+    """
+    if not value.startswith("urn:ietf:params:scim:schemas:extension:"):
+        raise ValueError("Wrong SICM schema extension URN format")
+    return value
+
+
+class ClientAccessScimSettings(BaseModel):
+    """Pydantic model for SCIM-related settings.
+
+    Used if LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS is enabled.
+    """
+
+    resource_types_endpoint: AnyHttpUrl = Field(
+        title="SCIM `/ResourceTypes` endpoint",
+        description="Required if authority is extended to include OIDC Client"
+        "the user has access to.",
+    )
+    user_extension_schema: Annotated[
+        str, AfterValidator(validate_scim_extension_urn)
+    ] = Field(
+        title="SCIM 'Client Access' User extension schema",
+        description="Required if authority is extended to include OIDC Client"
+        "the user has access to.",
+    )
+    extension_schema_jq_path: Annotated[str, AfterValidator(validate_jq_expression)] = (
+        Field(
+            title="SCIM 'Client Access' User extension schema path"
+            "to `client_ids` (jq path)",
+            description="Path to `client_ids` (list) in SCIM User Extension"
+            "response. "
+            "Required if authority is extended to include OIDC Client"
+            "the user has access to.",
+        )
+    )
+
+
 CorsAllowOriginUrlTypeAdapter = TypeAdapter(
     Annotated[
         AnyHttpUrl,
@@ -198,7 +246,7 @@ def validate_cors_allow_origin_url(
     if origin != str(value):
         raise ValueError(
             f"CORS AllowOrigin URL format incorrect."
-            f" Expected: {origin}, got: {str(value)}"
+            f"Expected: {origin}, got: {str(value)}"
         )
     return origin
 
@@ -276,8 +324,19 @@ class Settings(BaseSettings):
             ["https://my-allowed-origin.com", "https://my-other-allowed-origin.com"]
         ],
     )
+    RUNSERVER_SCIM_CLIENT_ACCESS: Optional[ClientAccessScimSettings] = Field(
+        None,
+        title="SCIM 'Client Access' feature configuration",
+        description="Required if authority is extended to include OIDC Client "
+        "the user has access to.",
+    )
     LRS_RESTRICT_BY_AUTHORITY: bool = False
     LRS_RESTRICT_BY_SCOPES: bool = False
+    LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS: bool = Field(
+        False,
+        description="When GETing statements with `mine=True`,"
+        "users also get statements coming from OIDC clients",
+    )
     SENTRY_CLI_TRACES_SAMPLE_RATE: float = 1.0
     SENTRY_DSN: Optional[str] = None
     SENTRY_IGNORE_HEALTH_CHECKS: bool = False
@@ -306,11 +365,36 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def check_restriction_compatibility(self):
-        """Raise an error if scopes are being used without authority restriction."""
+        """Raise an error if 'Restrict' config is incorrectly set.
+
+        - scopes are being used without authority restriction.
+        - 'Client Access' authority extension is used with OIDC disabled.
+        - 'Client Access' authority extension is enabled but the SCIM-related config
+           is not/incorrectly set.
+
+        restriction.
+        """
         if self.LRS_RESTRICT_BY_SCOPES and not self.LRS_RESTRICT_BY_AUTHORITY:
             raise ConfigurationException(
                 "LRS_RESTRICT_BY_AUTHORITY must be set to True if using "
                 "LRS_RESTRICT_BY_SCOPES=True"
+            )
+        if (
+            self.LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS
+            and AuthBackend.OIDC not in self.RUNSERVER_AUTH_BACKENDS
+        ):
+            raise ConfigurationException(
+                "OIDC backend must be enabled if using "
+                "LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS=True"
+            )
+
+        if (
+            self.LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS
+            and not self.RUNSERVER_SCIM_CLIENT_ACCESS
+        ):
+            raise ConfigurationException(
+                "RUNSERVER_SCIM_CLIENT_ACCESS must be set if using "
+                "LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS=True"
             )
         return self
 

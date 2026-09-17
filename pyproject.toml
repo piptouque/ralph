@@ -123,6 +123,7 @@ lrs = [
     "sentry_sdk==2.14.0",
     "python-jose==3.3.0",
     "uvicorn[standard]==0.30.6",
+    "jq>=1.12.0",
 ]
 full = [
     "ralph-malph[backends,cli,lrs]",
