@@ -9,9 +9,18 @@ from typing import List, Optional, Union
 from uuid import UUID
 
 from ralph.api.auth import AuthBackend
+from ralph.conf import ClientAccessScimSettings
 from ralph.utils import statements_are_equivalent
 
-from tests.fixtures.auth import AUDIENCE, CLIENT_ID, CLIENT_SECRET, ISSUER_URI
+from tests.fixtures.auth import (
+    AUDIENCE,
+    CLIENT_ID,
+    CLIENT_SECRET,
+    ISSUER_URI,
+    SCIM_CLIENT_ACCESS_EXTENSION_SCHEMA_JQ_PATH,
+    SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT,
+    SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
+)
 
 
 def string_is_date(string: str):
@@ -244,3 +253,19 @@ def configure_env_for_mock_oidc_auth(
             "ralph.api.auth.oidc.settings.RUNSERVER_AUTH_OIDC_CLIENT_SECRET",
             CLIENT_SECRET,
         )
+
+
+def configure_env_for_mock_scim_client_access(monkeypatch):
+    """Configure environment variables to simulate SCIM use."""
+
+    scim_config = ClientAccessScimSettings(
+        resource_types_endpoint=SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT,
+        user_extension_schema=SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
+        extension_schema_jq_path=SCIM_CLIENT_ACCESS_EXTENSION_SCHEMA_JQ_PATH,
+    )
+    monkeypatch.setattr(
+        "ralph.api.auth.settings.RUNSERVER_SCIM_CLIENT_ACCESS", scim_config
+    )
+    monkeypatch.setattr(
+        "ralph.api.auth.settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS", True
+    )
