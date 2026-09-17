@@ -17,7 +17,8 @@ from tests.fixtures.auth import (
     CLIENT_ID,
     CLIENT_SECRET,
     ISSUER_URI,
-    SCIM_CLIENT_ACCESS_EXTENSION_SCHEMA_JQ_PATH,
+    SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH,
+    SCIM_CLIENT_ACCESS_CLIENT_NAME_JQ_PATH,
     SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT,
     SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
 )
@@ -261,7 +262,8 @@ def configure_env_for_mock_scim_client_access(monkeypatch):
     scim_config = ClientAccessScimSettings(
         resource_types_endpoint=SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT,
         user_extension_schema=SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
-        extension_schema_jq_path=SCIM_CLIENT_ACCESS_EXTENSION_SCHEMA_JQ_PATH,
+        client_id_jq_path=SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH,
+        client_name_jq_path=SCIM_CLIENT_ACCESS_CLIENT_NAME_JQ_PATH,
     )
     monkeypatch.setattr(
         "ralph.api.auth.settings.RUNSERVER_SCIM_CLIENT_ACCESS", scim_config

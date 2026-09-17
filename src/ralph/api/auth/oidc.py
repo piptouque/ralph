@@ -104,9 +104,13 @@ class AuthenticatedOidcClient(AuthenticatedUser):
     client_id: str
 
     @classmethod
-    def get_agent(cls, iss: str, client_id: str) -> BaseXapiAgentWithOpenId:
+    def get_agent(
+        cls, iss: str, client_id: str, name: Optional[str] = None
+    ) -> BaseXapiAgentWithOpenId:
         """Get Agent data from provided client info."""
-        return BaseXapiAgentWithOpenId(openid=f"{iss}/application/{client_id}")
+        return BaseXapiAgentWithOpenId(
+            openid=f"{iss}/application/{client_id}", name=name
+        )
 
     @classmethod
     def make(cls, token_info: TokenIntrospection):
@@ -472,16 +476,16 @@ def get_oidc_user(
                 #       the most convenient way to do that is to authorise Ralph
                 #       to perform the operations, instead of the user.
                 #       so we reuse the ClientCredentials auth_header.
-                client_ids = scim.get_user_owned_client_ids(
+                client_data = scim.get_user_accessible_clients(
                     user_sub=user_info.sub,
                     client_access_config=settings.RUNSERVER_SCIM_CLIENT_ACCESS,
                     auth_header=client_credentials_auth_header,
                 )
                 client_agents = [
                     AuthenticatedOidcClient.get_agent(
-                        iss=token_info.iss, client_id=client_id
+                        iss=token_info.iss, client_id=client.client_id, name=client.name
                     )
-                    for client_id in client_ids
+                    for client in client_data
                 ]
             except HTTPException:
                 client_agents = None

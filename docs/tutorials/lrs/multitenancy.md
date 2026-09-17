@@ -40,9 +40,16 @@ RALPH_RUNSERVER_SCIM_CLIENT_OWNERSHIP__user_extension_schema  = "urn:ietf:params
 RALPH_RUNSERVER_SCIM_CLIENT_OWNERSHIP__extension_schema_jq_path = ".clients.[].value"
 ```
 
+
 - `resource_types_endpoint` is the HTTPS address of the `/ResourceTypes` SCIM endpoint.
-- `extension_schema_jq_path` is a [jq](https://jqlang.org/) path to a list of OIDC client ids
+- `client_id_jq_path` is a [jq](https://jqlang.org/) path to a list of OIDC client ids
    inside the 'Client Access' extension part of the SCIM `/User` response.
+
+And also optionally:
+
+```bash title=".env"
+RALPH_RUNSERVER_SCIM_CLIENT_ACCESS__client_name_jq_path = ".clients.[].display"
+```
 
 For instance, if by querying your SCIM server at `https://my_scimerver/scim/v2/Users/USER_ID` response:
 
@@ -70,10 +77,12 @@ For instance, if by querying your SCIM server at `https://my_scimerver/scim/v2/U
       "urn:ietf:params:scim:schemas:extension:client_access:2.0:User": {
         "clients": [
             {
-                "value": CLIENT_ID_1
+                "value": CLIENT_ID_1,
+                "display": CLIENT_NAME_1
             },
             {
-                "value": CLIENT_ID_2
+                "value": CLIENT_ID_2,
+                "display": CLIENT_NAME_2
             }
         ]
       },
@@ -85,6 +94,7 @@ Then:
 
 - the 'Client Access' extension URI is `"urn:ietf:params:scim:schemas:extension:client_access:2.0:User"`
 - the correct `jq` path to get `[CLIENT_ID_1, CLIENT_ID_2]` would be `".clients.[].value"`.
+- the correct `jq` path to get `[CLIENT_NAME_1, CLIENT_NAME_2]` would be `".clients.[].display"`.
 
 If all the above is, you may enable that behaviour with this flag:
 
