@@ -175,33 +175,32 @@ def validate_scim_extension_urn(value: str) -> str:
     return value
 
 
-class ClientOwnershipScimSettings(BaseModel):
+class ClientAccessScimSettings(BaseModel):
     """Pydantic model for SCIM-related settings.
 
-    Used if LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP is enabled.
+    Used if LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS is enabled.
     """
 
     resource_types_endpoint: AnyHttpUrl = Field(
         title="SCIM `/ResourceTypes` endpoint",
-        description="Used if authority is extended to 'Client ownership'",
+        description="Required if authority is extended to include OIDC Client"
+        "the user has access to.",
     )
     user_extension_schema: Annotated[
         str, AfterValidator(validate_scim_extension_urn)
     ] = Field(
-        title="SCIM 'Client ownership' user extension schema",
-        description="Used if authority is extended to 'Client ownership'",
-    )
-    group_extension_schema: Annotated[
-        str, AfterValidator(validate_scim_extension_urn)
-    ] = Field(
-        title="SCIM 'Client ownership' group extension schema",
-        description="Used if authority is extended to 'Client ownership'",
+        title="SCIM 'Client Access' User extension schema",
+        description="Required if authority is extended to include OIDC Client"
+        "the user has access to.",
     )
     extension_schema_jq_path: Annotated[str, AfterValidator(validate_jq_expression)] = (
         Field(
-            title="SCIM 'Client ownership' extension schema JQ path"
-            " to a list of client ids",
-            description="Used if authority is extended to 'Client ownership'",
+            title="SCIM 'Client Access' User extension schema path"
+            "to `client_ids` (jq path)",
+            description="Path to `client_ids` (list) in SCIM User Extension"
+            "response. "
+            "Required if authority is extended to include OIDC Client"
+            "the user has access to.",
         )
     )
 
@@ -325,14 +324,15 @@ class Settings(BaseSettings):
             ["https://my-allowed-origin.com", "https://my-other-allowed-origin.com"]
         ],
     )
-    RUNSERVER_SCIM_CLIENT_OWNERSHIP: Optional[ClientOwnershipScimSettings] = Field(
+    RUNSERVER_SCIM_CLIENT_ACCESS: Optional[ClientAccessScimSettings] = Field(
         None,
-        title="SCIM 'Client ownership' feature",
-        description="Used if authority is extended to 'Client ownership'",
+        title="SCIM 'Client Access' feature configuration",
+        description="Required if authority is extended to include OIDC Client "
+        "the user has access to.",
     )
     LRS_RESTRICT_BY_AUTHORITY: bool = False
     LRS_RESTRICT_BY_SCOPES: bool = False
-    LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP: bool = Field(
+    LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS: bool = Field(
         False,
         description="When GETing statements with `mine=True`,"
         "users also get statements coming from OIDC clients",
@@ -368,8 +368,8 @@ class Settings(BaseSettings):
         """Raise an error if 'Restrict' config is incorrectly set.
 
         - scopes are being used without authority restriction.
-        - 'client ownership' authority extension is used with OIDC disabled.
-        - 'client ownership' authority extension is enabled but the SCIM-related config
+        - 'Client Access' authority extension is used with OIDC disabled.
+        - 'Client Access' authority extension is enabled but the SCIM-related config
            is not/incorrectly set.
 
         restriction.
@@ -380,21 +380,21 @@ class Settings(BaseSettings):
                 "LRS_RESTRICT_BY_SCOPES=True"
             )
         if (
-            self.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP
+            self.LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS
             and AuthBackend.OIDC not in self.RUNSERVER_AUTH_BACKENDS
         ):
             raise ConfigurationException(
                 "OIDC backend must be enabled if using "
-                "LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP=True"
+                "LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS=True"
             )
 
         if (
-            self.LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP
-            and not self.RUNSERVER_SCIM_CLIENT_OWNERSHIP
+            self.LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS
+            and not self.RUNSERVER_SCIM_CLIENT_ACCESS
         ):
             raise ConfigurationException(
-                "RUNSERVER_SCIM_CLIENT_OWNERSHIP must be set if using "
-                "LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP=True"
+                "RUNSERVER_SCIM_CLIENT_ACCESS must be set if using "
+                "LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS=True"
             )
         return self
 

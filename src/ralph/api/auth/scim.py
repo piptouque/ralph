@@ -10,7 +10,7 @@ from cachetools import TTLCache, cached
 from fastapi import HTTPException, status
 from pydantic import AnyUrl
 
-from ralph.conf import ClientOwnershipScimSettings, settings
+from ralph.conf import ClientAccessScimSettings, settings
 
 # API auth logger
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ def get_scim_resource(url: AnyUrl, auth_header: str) -> Dict:
 
 def get_user_owned_client_ids(
     user_sub: str,
-    client_ownership_config: ClientOwnershipScimSettings,
+    client_access_config: ClientAccessScimSettings,
     auth_header: str,
 ) -> list[str]:
     """Get the the ids of OIDC clients that are 'owned' by the authenticated user.
@@ -78,7 +78,7 @@ def get_user_owned_client_ids(
 
     Args:
         user_sub (str): user's OIDC sub (identifier)
-        client_ownership_config (ClientOwnershipScimSettings): SCIM 'Client ownership'
+        client_access_config (ClientAccessScimSettings): SCIM 'Client Access'
                                                       user extension settings
         auth_header (str): OIDC authentication header value.
                            Must be authorized to access SCIM resources.
@@ -90,7 +90,7 @@ def get_user_owned_client_ids(
         HTTPException
     """
     resource_types = get_scim_resource_types(
-        client_ownership_config.resource_types_endpoint, auth_header=auth_header
+        client_access_config.resource_types_endpoint, auth_header=auth_header
     )
     user_resource_type = resource_types["User"]
 
@@ -99,10 +99,10 @@ def get_user_owned_client_ids(
     scim_user = get_scim_resource(
         url=f"{user_endpoint}/{user_sub}", auth_header=auth_header
     )
-    if client_ownership_config.user_extension_schema not in scim_user:
+    if client_access_config.user_extension_schema not in scim_user:
         logger.error(
             "Unable to get provided schema %s from SCIM user",
-            client_ownership_config.user_extension_schema,
+            client_access_config.user_extension_schema,
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -113,14 +113,14 @@ def get_user_owned_client_ids(
     def get_client_ids(client_data: dict) -> str:
         try:
             return (
-                jq.compile(client_ownership_config.extension_schema_jq_path)
+                jq.compile(client_access_config.extension_schema_jq_path)
                 .input_value(client_data)
                 .all()
             )
         except ValueError:
             logger.error(
                 "Input data did not adhere to jq schema `%s`",
-                client_ownership_config.extension_schema_jq_path,
+                client_access_config.extension_schema_jq_path,
             )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -128,23 +128,7 @@ def get_user_owned_client_ids(
                 headers={"WWW-Authenticate": "Bearer"},
             ) from None
 
-    client_data = scim_user[client_ownership_config.user_extension_schema]
+    client_data = scim_user[client_access_config.user_extension_schema]
     client_ids = get_client_ids(client_data)
 
-    scim_group_urls = [group["$ref"] for group in scim_user["groups"]]
-
-    for scim_group_url in scim_group_urls:
-        scim_group = get_scim_resource(url=scim_group_url, auth_header=auth_header)
-        if client_ownership_config.group_extension_schema not in scim_group:
-            logger.error(
-                "Unable to get provided schema %s from SCIM group",
-                client_ownership_config.group_extension_schema,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        client_data = scim_group[client_ownership_config.group_extension_schema]
-        client_ids += get_client_ids(client_data)
     return client_ids

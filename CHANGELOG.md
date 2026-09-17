@@ -17,10 +17,11 @@ and this project adheres to
 - API: implement GET '/statements' 'related_agents' query parameter
 - API: allow users with new `authority/write` scope to override authority
        when PUTting or POSTing statements
-- Add the LRS_EXTEND_AUTHORITY_TO_CLIENT_OWNERSHIP
-  option to extend Authority restriction to 'Client Ownership'(OIDC only)
+- Add the LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS
+  option to extend Authority restriction to OIDC Client Agents a user has access to
   - Requires LRS_RESTRICT_BY_AUTHORITY (would not have any effect otherwise)
   - Done using SCIM calls via the provided endpoint and schemas (conf values)
+  - Requires a 'Client Access' SCIM User extension
   - Add 'Client agents' info to `/whoami` endpoint when it is enabled
 
 ### Removed
