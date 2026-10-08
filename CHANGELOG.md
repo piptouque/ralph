@@ -13,6 +13,7 @@ and this project adheres to
 - API: support for CORS request
 - Improve validation error reporting for empty or invalid values
   in xAPI statements
+- Backends: (internal) add support for multiple authority queries
 
 ### Removed
 
