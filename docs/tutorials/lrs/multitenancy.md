@@ -37,5 +37,6 @@ Valid scopes are a slight variation on those proposed by the
 - define
 - profile/write
 - profile/read
+- authority/write
 - all/read
 - all
