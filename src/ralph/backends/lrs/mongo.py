@@ -13,6 +13,7 @@ from ralph.backends.data.mongo import (
     MongoQuery,
 )
 from ralph.backends.lrs.base import (
+    RELATED_AGENTS_FIELDS,
     AgentParameters,
     BaseLRSBackend,
     BaseLRSBackendSettings,
@@ -80,7 +81,14 @@ class MongoLRSBackend(BaseLRSBackend[MongoLRSBackendSettings], MongoDataBackend)
         if params.statement_id:
             mongo_query_filters.update({"_source.id": params.statement_id})
 
-        MongoLRSBackend._add_agent_filters(mongo_query_filters, params.agent, "actor")
+        if params.related_agents:
+            MongoLRSBackend._add_related_agent_filters(
+                mongo_query_filters, params.agent
+            )
+        else:
+            MongoLRSBackend._add_agent_filters(
+                mongo_query_filters, params.agent, "actor"
+            )
         MongoLRSBackend._add_agent_filters(
             mongo_query_filters, params.authority, "authority"
         )
@@ -123,12 +131,14 @@ class MongoLRSBackend(BaseLRSBackend[MongoLRSBackendSettings], MongoDataBackend)
     @staticmethod
     def _get_agent_filters(
         agent_params: AgentParameters,
-        target_field: str,
+        target_field: Union[str, tuple[str, ...]],
     ) -> Union[dict, None]:
         if not agent_params:
             return None
         if not isinstance(agent_params, dict):
             agent_params = agent_params.model_dump()
+        if not isinstance(target_field, str):
+            target_field = ".".join(target_field)
 
         if agent_params.get("mbox"):
             key = f"_source.{target_field}.mbox"
@@ -160,7 +170,7 @@ class MongoLRSBackend(BaseLRSBackend[MongoLRSBackendSettings], MongoDataBackend)
         cls,
         mongo_query_filters: dict,
         agent_params: Union[AgentParameters, list[AgentParameters]],
-        target_field: str,
+        target_field: Union[str, tuple[str, ...]],
     ) -> None:
         """Add filters relative to agents to mongo_query_filters.
 
@@ -184,3 +194,26 @@ class MongoLRSBackend(BaseLRSBackend[MongoLRSBackendSettings], MongoDataBackend)
                 if params
             ]
             mongo_query_filters.update({"$or": filters})
+
+    @classmethod
+    def _add_related_agent_filters(
+        cls,
+        mongo_query_filters: dict,
+        agent_params: Union[AgentParameters, list[AgentParameters]],
+    ) -> None:
+        """Add filters relative to agents to `where`, including any 'related agents'."""
+        if not agent_params:
+            return
+
+        related_filters = []
+        for field in RELATED_AGENTS_FIELDS:
+            field_filter = {}
+            cls._add_agent_filters(
+                mongo_query_filters=field_filter,
+                agent_params=agent_params,
+                target_field=field,
+            )
+            if len(field_filter) > 0:
+                related_filters.append(field_filter)
+        if len(related_filters) > 0:
+            mongo_query_filters.update({"$or": related_filters})

@@ -11,6 +11,7 @@ from ralph.backends.data.clickhouse import (
     ClickHouseDataBackendSettings,
 )
 from ralph.backends.lrs.base import (
+    RELATED_AGENTS_FIELDS,
     AgentParameters,
     BaseLRSBackend,
     BaseLRSBackendSettings,
@@ -59,7 +60,10 @@ class ClickHouseLRSBackend(
         if params.statement_id:
             where.append("event_id = {statementId:UUID}")
 
-        self._add_agent_filters(ch_params, where, params.agent, "actor")
+        if params.related_agents:
+            self._add_related_agent_filters(ch_params, where, params.agent)
+        else:
+            self._add_agent_filters(ch_params, where, params.agent, "actor")
         ch_params.pop("agent", None)
 
         self._add_agent_filters(ch_params, where, params.authority, "authority")
@@ -162,7 +166,7 @@ class ClickHouseLRSBackend(
     @staticmethod
     def _get_agent_filters(
         agent_params: AgentParameters,
-        target_field: str,
+        target_field: Union[str, tuple[str, ...]],
         idx: Optional[int] = None,
     ) -> Union[tuple[list[str], dict], None]:
         if not agent_params:
@@ -171,8 +175,13 @@ class ClickHouseLRSBackend(
         if not isinstance(agent_params, dict):
             agent_params = agent_params.model_dump()
 
-        extract_string_field = f"'{target_field}'"
-        param_field = f"{target_field}_{idx}" if idx is not None else target_field
+        if isinstance(target_field, str):
+            extract_string_field = f"'{target_field}'"
+            param_field = target_field
+        else:
+            extract_string_field = ", ".join([f"'{part}'" for part in target_field])
+            param_field = "__".join(target_field)
+        param_field = f"{param_field}_{idx}" if idx is not None else param_field
 
         if agent_params.get("mbox"):
             return (
@@ -223,7 +232,7 @@ class ClickHouseLRSBackend(
         ch_params: dict,
         where: list,
         agent_params: Union[AgentParameters, list[AgentParameters]],
-        target_field: str,
+        target_field: Union[str, tuple[str, ...]],
     ) -> None:
         """Add filters relative to agents to `where`."""
         if not agent_params:
@@ -248,3 +257,28 @@ class ClickHouseLRSBackend(
             _where = [" OR ".join([" AND ".join(el[0]) for el in filters])]
             ch_params.update(_ch_params)
             where.extend(_where)
+
+    @classmethod
+    def _add_related_agent_filters(
+        cls,
+        ch_params: dict,
+        where: list,
+        agent_params: Union[AgentParameters, list[AgentParameters]],
+    ) -> None:
+        """Add filters relative to agents to `where`, including any 'related agents'."""
+        if not agent_params:
+            return
+
+        related_where = []
+        for field in RELATED_AGENTS_FIELDS:
+            field_where = []
+            cls._add_agent_filters(
+                ch_params=ch_params,
+                where=field_where,
+                agent_params=agent_params,
+                target_field=field,
+            )
+            if len(field_where) > 0:
+                related_where.append(" AND ".join(field_where))
+        if len(related_where) > 0:
+            where.append(" OR ".join(related_where))

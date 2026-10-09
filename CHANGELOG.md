@@ -14,6 +14,9 @@ and this project adheres to
 - Improve validation error reporting for empty or invalid values
   in xAPI statements
 - Backends: (internal) add support for multiple authority queries
+- API: allow users with new `authority/write` scope to override authority
+       when PUTting or POSTing statements
+- API: implement GET '/statements' 'related_agents' query parameter
 
 ### Removed
 
