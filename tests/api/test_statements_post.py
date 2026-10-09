@@ -913,6 +913,6 @@ async def test_api_statements_post_set_authority(  # noqa: PLR0913
     assert stored.status_code == 200
     stored_authority = stored.json()["statements"][0]["authority"]
     if can_set_authority:
-        assert stored_authority["mbox"] == authority["mbox"]
+        assert stored_authority.get("mbox") == authority["mbox"]
     else:
         assert stored_authority.get("mbox") != authority["mbox"]
