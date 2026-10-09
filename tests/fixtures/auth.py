@@ -292,6 +292,7 @@ def _mock_oidc_introspection_response(sub, scopes, target=None):
         token_introspection["target"] = target
     return token_introspection
 
+
 def _mock_oidc_token_response(access_token, scopes):
     """Mock OIDC Token response with provided params."""
     token_data = {

@@ -159,6 +159,7 @@ class AuthenticatedOidcUser(AuthenticatedUser):
             client_agents=client_agents,
         )
 
+
 @lru_cache()
 def discover_provider(base_url: AnyUrl) -> Dict:
     """Discover the authentication server (or OpenId Provider) configuration."""
@@ -437,7 +438,9 @@ def get_oidc_user(
             encoded_user_info=access_token, provider_config=provider_config
         )
         user_info = UserInfo.model_validate(id_token)
-        return AuthenticatedOidcUser.make(iss=id_token["iss"], scope=id_token.get("scope"), user_info=user_info)
+        return AuthenticatedOidcUser.make(
+            iss=id_token["iss"], scope=id_token.get("scope"), user_info=user_info
+        )
 
     client_basic_auth_header = get_client_basic_auth_header(
         client_id=settings.RUNSERVER_AUTH_OIDC_CLIENT_ID,
@@ -494,5 +497,8 @@ def get_oidc_user(
                 )
 
         return AuthenticatedOidcUser.make(
-            user_info=user_info, iss=token_info.iss, scope=token_info.scope, client_agents=client_agents
+            user_info=user_info,
+            iss=token_info.iss,
+            scope=token_info.scope,
+            client_agents=client_agents,
         )
