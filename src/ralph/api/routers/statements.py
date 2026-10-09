@@ -24,6 +24,7 @@ from pydantic.types import Json
 from typing_extensions import Annotated
 
 from ralph.api.auth import get_authenticated_user
+from ralph.api.auth.oidc import AuthenticatedOidcUser
 from ralph.api.auth.user import AuthenticatedUser
 from ralph.api.forwarding import forward_xapi_statements, get_active_xapi_forwardings
 from ralph.api.models import ErrorDetail, LaxStatement
@@ -75,6 +76,52 @@ POST_PUT_RESPONSES = {
 }
 
 
+def get_accessible_authorities(user: AuthenticatedOidcUser) -> list[BaseXapiAgent]:
+    """Get list of authorities that the user can GET/POST statements to.
+
+    Note that if `LRS_RESTRICT_BY_AUTHORITY` is False,
+    all authorities are considered accessible,
+    which is not reflected by this function.
+
+    Args:
+        user (AuthenticatedOidcUser): Current user
+
+    Returns:
+        list[BaseXapiAgent]: Agents of authorities that
+                             the user can GET/POST statements to
+    """
+    if not settings.LRS_RESTRICT_BY_AUTHORITY:
+        return True
+    accessible_authorities = [user.agent]
+    if (
+        settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS
+        and isinstance(user, AuthenticatedOidcUser)
+        and user.client_agents is not None
+    ):
+        accessible_authorities += user.client_agents
+    return accessible_authorities
+
+
+def is_authority_accessible(
+    user: AuthenticatedOidcUser, authority: BaseXapiAgent
+) -> bool:
+    """Check whether the given authority can be accessed by user.
+
+    Note that if `LRS_RESTRICT_BY_AUTHORITY` is False,
+    all authorities are considered accessible.
+
+    Args:
+        user (AuthenticatedOidcUser): Current user
+        authority (BaseXapiAgent): Authority agent
+
+    Returns:
+        bool: True if authority is accessible by user, False otherwise
+    """
+    if not settings.LRS_RESTRICT_BY_AUTHORITY:
+        return True
+    return authority in get_accessible_authorities(user=user, authority=authority)
+
+
 def _enrich_statement_with_id(statement: dict) -> None:
     # id: Statement UUID identifier.
     # https://github.com/adlnet/xAPI-Spec/blob/master/xAPI-Data.md#24-statement-properties
@@ -107,7 +154,16 @@ def _enrich_statement_with_authority(
             agent = TypeAdapter(BaseXapiAgent).validate_python(statement["authority"])
             authority = agent.model_dump(exclude_none=True, mode="json")
         except ValidationError:
-            logger.warning("Failed to set authority as requested, validation error.")
+            logger.warning(
+                "Failed to set authority as requested: validation error "
+                "(this should not happen)."
+            )
+            authority = None
+        if not is_authority_accessible(user=current_user, authority=authority):
+            logger.warning(
+                "Failed to set authority as requested: authority is not "
+                "accessible to user."
+            )
             authority = None
     if authority is None:
         authority = current_user.agent.model_dump(exclude_none=True, mode="json")
@@ -396,16 +452,20 @@ async def get(  # noqa: PLR0913
     if settings.LRS_RESTRICT_BY_SCOPES:
         if not current_user.scopes.is_authorized("statements/read"):
             mine = True
-    # mine: If using only authority, always restrict (otherwise, use the default value)
+    # mine: If using only authority, always restrict
+    #       (otherwise, use the default value)
     elif settings.LRS_RESTRICT_BY_AUTHORITY:
         mine = True
 
     # Filter by authority if using `mine`
     if mine:
-        query_params["authority"] = _parse_agent_parameters(
-            current_user.agent.model_dump(mode="json")
-        ).model_dump(mode="json", exclude_none=True)
-
+        accessible_authorities = get_accessible_authorities(user=current_user)
+        query_params["authority"] = [
+            _parse_agent_parameters(agent.model_dump(mode="json")).model_dump(
+                mode="json", exclude_none=True
+            )
+            for agent in accessible_authorities
+        ]
     if "mine" in query_params:
         query_params.pop("mine")
 
