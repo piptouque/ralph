@@ -3,12 +3,13 @@
 import logging
 from threading import Lock
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
 import jq
 import requests
 from cachetools import TTLCache, cached
 from fastapi import HTTPException, status
-from pydantic import AnyUrl, BaseModel, ValidationError
+from pydantic import AnyUrl, BaseModel, HttpUrl, ValidationError
 
 from ralph.conf import ClientAccessScimSettings, settings
 
@@ -96,12 +97,20 @@ def get_user_accessible_clients(
     Raises:
         HTTPException
     """
+    resource_types_endpoint = HttpUrl(
+        f"{client_access_config.scim_base_url}/ResourceTypes"
+    )
     resource_types = get_scim_resource_types(
-        client_access_config.resource_types_endpoint, auth_header=auth_header
+        resource_types_endpoint, auth_header=auth_header
     )
     user_resource_type = resource_types["User"]
 
     user_endpoint = user_resource_type["endpoint"]
+    parsed_user_endpoint = urlparse(user_endpoint)
+    if not parsed_user_endpoint.netloc:
+        # if the user endpoint is relative,
+        # add the SCIM base url
+        user_endpoint = HttpUrl(f"{client_access_config.scim_base_url}/{user_endpoint}")
 
     scim_user = get_scim_resource(
         url=f"{user_endpoint}/{user_sub}", auth_header=auth_header

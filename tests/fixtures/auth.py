@@ -29,7 +29,7 @@ CLIENT_SECRET = "my-client-secret"
 PUBLIC_KEY_ID = "example-key-id"
 
 SCIM_BASE_URL = "http://providerHost:8080/scim/v2"
-SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT = f"{SCIM_BASE_URL}/ResourceTypes"
+SCIM_CLIENT_ACCESS_SCIM_BASE_URL = SCIM_BASE_URL
 SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA = (
     "urn:ietf:params:scim:schemas:extension:client_access:2.0:User"
 )
@@ -627,7 +627,7 @@ def mock_scim_server(
     # Mock request to get /ResourceTypes
     responses.add_callback(
         responses.GET,
-        f"{SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT}",
+        f"{SCIM_CLIENT_ACCESS_SCIM_BASE_URL}/ResourceTypes",
         callback=protect_oidc_token_callback(resource_types, access_token=access_token),
     )
 

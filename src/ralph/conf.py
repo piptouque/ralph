@@ -181,8 +181,8 @@ class ClientAccessScimSettings(BaseModel):
     Used if LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS is enabled.
     """
 
-    resource_types_endpoint: AnyHttpUrl = Field(
-        title="SCIM `/ResourceTypes` endpoint",
+    scim_base_url: AnyHttpUrl = Field(
+        title="SCIM server base URL",
     )
     user_extension_schema: Annotated[
         str, AfterValidator(validate_scim_extension_urn)

@@ -19,7 +19,7 @@ from tests.fixtures.auth import (
     ISSUER_URI,
     SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH,
     SCIM_CLIENT_ACCESS_CLIENT_NAME_JQ_PATH,
-    SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT,
+    SCIM_CLIENT_ACCESS_SCIM_BASE_URL,
     SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
 )
 
@@ -270,7 +270,7 @@ def configure_env_for_mock_scim_client_access(monkeypatch):
     """Configure environment variables to simulate SCIM use."""
 
     scim_config = ClientAccessScimSettings(
-        resource_types_endpoint=SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT,
+        scim_base_url=SCIM_CLIENT_ACCESS_SCIM_BASE_URL,
         user_extension_schema=SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
         client_id_jq_path=SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH,
         client_name_jq_path=SCIM_CLIENT_ACCESS_CLIENT_NAME_JQ_PATH,

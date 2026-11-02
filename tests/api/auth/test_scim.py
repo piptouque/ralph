@@ -13,7 +13,7 @@ from ralph.models.xapi.base.agents import BaseXapiAgentWithOpenId
 
 from tests.fixtures.auth import (
     SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH,
-    SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT,
+    SCIM_CLIENT_ACCESS_SCIM_BASE_URL,
     SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
     mock_oidc_user,
     mock_scim_server,
@@ -171,7 +171,7 @@ async def test_api_auth_oidc_scim_get_whoami_invalid_config(client, monkeypatch)
     get_scim_resource.cache_clear()
 
     invalid_scim_config = ClientAccessScimSettings(
-        resource_types_endpoint=SCIM_CLIENT_ACCESS_RESOURCE_TYPES_ENDPOINT,
+        scim_base_url=SCIM_CLIENT_ACCESS_SCIM_BASE_URL,
         user_extension_schema=SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
         client_id_jq_path=SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH + ".nope",
     )
