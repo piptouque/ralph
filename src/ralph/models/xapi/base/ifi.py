@@ -1,5 +1,7 @@
 """Base xAPI `Inverse Functional Identifier` definitions."""
 
+from typing import Union, get_args
+
 from pydantic import StringConstraints
 from typing_extensions import Annotated
 
@@ -59,3 +61,26 @@ class BaseXapiAccountIFI(BaseModelWithConfig):
     """
 
     account: BaseXapiAccount
+
+
+BaseXapiIFI = Union[
+    BaseXapiMboxIFI,
+    BaseXapiMboxSha1SumIFI,
+    BaseXapiOpenIdIFI,
+    BaseXapiAccountIFI,
+]
+
+
+def is_same_ifi(ifi: BaseXapiIFI, other_ifi: BaseXapiIFI) -> bool:
+    """Checks whether the two IFIs represent the same entity."""
+    for ifi_type in get_args(BaseXapiIFI):
+        if isinstance(ifi, ifi_type) and not isinstance(other_ifi, ifi_type):
+            return False
+    if isinstance(ifi, BaseXapiMboxIFI):
+        return ifi.mbox == other_ifi.mbox
+    if isinstance(ifi, BaseXapiMboxSha1SumIFI):
+        return ifi.mbox_sha1sum == other_ifi.mbox_sha1sum
+    if isinstance(ifi, BaseXapiOpenIdIFI):
+        return ifi.openid == other_ifi.openid
+    if isinstance(ifi, BaseXapiAccountIFI):
+        return ifi.account == other_ifi.account

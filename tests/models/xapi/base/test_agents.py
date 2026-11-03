@@ -4,11 +4,15 @@ import json
 import re
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from ralph.models.xapi.base.agents import (
+    BaseXapiAgent,
     BaseXapiAgentCommonProperties,
     BaseXapiAgentWithMboxSha1Sum,
+)
+from ralph.models.xapi.base.ifi import (
+    is_same_ifi,
 )
 
 from tests.factories import mock_xapi_instance
@@ -54,3 +58,72 @@ def test_models_xapi_base_agent_with_mbox_sha1_sum_ifi_with_invalid_field(mbox_s
         ValidationError, match="mbox_sha1sum\n  String should match pattern"
     ):
         BaseXapiAgentWithMboxSha1Sum(**invalid_field)
+
+
+@pytest.mark.parametrize(
+    "agent,other_agent,agent_is_same_ifi",
+    [
+        (
+            {"mbox": "mailto:text@example.com"},
+            {"mbox": "mailto:text@example.com"},
+            True,
+        ),
+        (
+            {"mbox": "mailto:text@example.com", "name": "alice"},
+            {"mbox": "mailto:text@example.com", "name": "bob"},
+            True,
+        ),
+        (
+            {"mbox": "mailto:text@example.com"},
+            {"mbox": "mailto:nope@example.com"},
+            False,
+        ),
+        (
+            {"mbox": "mailto:text@example.com"},
+            {"openid": "https://nope.com/nope"},
+            False,
+        ),
+        (
+            {"account": {"homePage": "https://example.com", "name": "yep"}},
+            {"account": {"homePage": "https://example.com", "name": "yep"}},
+            True,
+        ),
+        (
+            {
+                "account": {"homePage": "https://example.com", "name": "yep"},
+                "name": "what",
+            },
+            {"account": {"homePage": "https://example.com", "name": "yep"}},
+            True,
+        ),
+        (
+            {"account": {"homePage": "https://example.com", "name": "yep"}},
+            {"account": {"homePage": "https://example_nope.com", "name": "yep"}},
+            False,
+        ),
+        (
+            {"openid": "https://yep.com/yepyep"},
+            {"openid": "https://yep.com/yepyep"},
+            True,
+        ),
+        (
+            {"openid": "https://yep.com/yepyep"},
+            {"openid": "https://nope.com/nope"},
+            False,
+        ),
+        (
+            {"openid": "https://yep.com/yepyep"},
+            {"openid": "https://yep.com/yepyep", "objectType": "Agent"},
+            True,
+        ),
+    ],
+)
+def test_models_xapi_base_agent_is_same_ifi(agent, other_agent, agent_is_same_ifi):
+    """Test an invalid `mbox_sha1sum` property in
+    BaseXapiAgentWithMboxSha1Sum raises a `ValidationError`.
+    """
+
+    agent = TypeAdapter(BaseXapiAgent).validate_python(agent)
+    other_agent = TypeAdapter(BaseXapiAgent).validate_python(other_agent)
+
+    assert is_same_ifi(agent, other_agent) == agent_is_same_ifi
