@@ -30,6 +30,7 @@ PUBLIC_KEY_ID = "example-key-id"
 
 SCIM_BASE_URL = "http://providerHost:8080/scim/v2"
 SCIM_CLIENT_ACCESS_SCIM_BASE_URL = SCIM_BASE_URL
+SCIM_CLIENT_ACCESS_SCOPE = "openid"
 SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA = (
     "urn:ietf:params:scim:schemas:extension:client_access:2.0:User"
 )

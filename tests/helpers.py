@@ -20,6 +20,7 @@ from tests.fixtures.auth import (
     SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH,
     SCIM_CLIENT_ACCESS_CLIENT_NAME_JQ_PATH,
     SCIM_CLIENT_ACCESS_SCIM_BASE_URL,
+    SCIM_CLIENT_ACCESS_SCOPE,
     SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
 )
 
@@ -271,6 +272,7 @@ def configure_env_for_mock_scim_client_access(monkeypatch):
 
     scim_config = ClientAccessScimSettings(
         scim_base_url=SCIM_CLIENT_ACCESS_SCIM_BASE_URL,
+        scim_scope=SCIM_CLIENT_ACCESS_SCOPE,
         user_extension_schema=SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
         client_id_jq_path=SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH,
         client_name_jq_path=SCIM_CLIENT_ACCESS_CLIENT_NAME_JQ_PATH,

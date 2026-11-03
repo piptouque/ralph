@@ -294,14 +294,14 @@ def get_client_basic_auth_header(client_id: str, client_secret: str) -> str:
     lock=Lock(),
 )
 def get_client_credentials_auth_header(
-    token_endpoint: AnyUrl, client_basic_auth_header: str
+    token_endpoint: AnyUrl, client_basic_auth_header: str, scope: str
 ) -> str:
     """Authenticate to IdP as Ralph using ClientCredentials flow."""
     try:
         response = requests.post(
             f"{token_endpoint}",
             headers={"Authorization": client_basic_auth_header},
-            data={"grant_type": "client_credentials"},
+            data={"grant_type": "client_credentials", "scope": scope},
             timeout=5,
         )
         response.raise_for_status()
@@ -473,6 +473,7 @@ def get_oidc_user(
                 client_credentials_auth_header = get_client_credentials_auth_header(
                     token_endpoint=provider_config["token_endpoint"],
                     client_basic_auth_header=client_basic_auth_header,
+                    scope=settings.RUNSERVER_SCIM_CLIENT_ACCESS.scim_scope,
                 )
                 # NOTE: must have authorisation for performing SCIM operations.
                 #       the most convenient way to do that is to authorise Ralph

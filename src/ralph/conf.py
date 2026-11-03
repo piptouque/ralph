@@ -184,6 +184,12 @@ class ClientAccessScimSettings(BaseModel):
     scim_base_url: AnyHttpUrl = Field(
         title="SCIM server base URL",
     )
+    scim_scope: Optional[str] = Field(
+        title="SCIM OAuth2 scope",
+        description="(Optional) Scopes to get when requesting a ClientCrendentials"
+        "auth token for performing SCIM requests.",
+        default="openid",
+    )
     user_extension_schema: Annotated[
         str, AfterValidator(validate_scim_extension_urn)
     ] = Field(
