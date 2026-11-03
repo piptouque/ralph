@@ -54,12 +54,15 @@ def get_scim_resource_types(
     cache=TTLCache(maxsize=settings.AUTH_CACHE_MAX_SIZE, ttl=60),
     lock=Lock(),
 )
-def get_scim_resource(url: AnyUrl, auth_header: str) -> Dict:
-    """Get SCIM resource from given endpoint with `resource_id`."""
+def post_scim_resource_search(
+    resource_endpoint: AnyUrl, search_filter: str, auth_header: str
+) -> Dict:
+    """POST an SCIM resource search from given endpoint filter."""
     try:
-        response = requests.get(
-            f"{url}",
+        response = requests.post(
+            f"{resource_endpoint}/.search",
             headers={"Authorization": auth_header},
+            json={"filter": search_filter},
             timeout=5,
         )
         response.raise_for_status()
@@ -111,10 +114,22 @@ def get_user_accessible_clients(
         # if the user endpoint is relative,
         # add the SCIM base url
         user_endpoint = HttpUrl(f"{client_access_config.scim_base_url}/{user_endpoint}")
+    search_filter = f'userName eq "{user_sub}"'
 
-    scim_user = get_scim_resource(
-        url=f"{user_endpoint}/{user_sub}", auth_header=auth_header
+    scim_user_search = post_scim_resource_search(
+        resource_endpoint=user_endpoint,
+        search_filter=search_filter,
+        auth_header=auth_header,
     )
+    if not len(scim_user_search["Resources"]) == 1:
+        logger.error("Unable to find SCIM Resource user: %s", user_sub)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    scim_user = scim_user_search["Resources"][0]
+
     if client_access_config.user_extension_schema not in scim_user:
         logger.error(
             "Unable to get provided schema %s from SCIM user",

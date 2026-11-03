@@ -5,8 +5,8 @@ import responses
 from pydantic import TypeAdapter
 
 from ralph.api.auth.scim import (
-    get_scim_resource,
     get_scim_resource_types,
+    post_scim_resource_search,
 )
 from ralph.conf import ClientAccessScimSettings
 from ralph.models.xapi.base.agents import BaseXapiAgentWithOpenId
@@ -34,7 +34,7 @@ async def test_api_auth_oidc_scim_get_whoami_valid_no_clients(client, monkeypatc
 
     # Clear LRU cache
     get_scim_resource_types.cache_clear()
-    get_scim_resource.cache_clear()
+    post_scim_resource_search.cache_clear()
 
     user_sub = "a_user"
     oidc_token = mock_oidc_user(sub=user_sub)
@@ -63,7 +63,7 @@ async def test_api_auth_oidc_scim_get_whoami_valid_clients(client, monkeypatch):
 
     # Clear LRU cache
     get_scim_resource_types.cache_clear()
-    get_scim_resource.cache_clear()
+    post_scim_resource_search.cache_clear()
 
     user_sub = "a_user"
     oidc_token = mock_oidc_user(sub=user_sub)
@@ -112,7 +112,7 @@ async def test_api_auth_oidc_scim_get_whoami_valid_group_clients(client, monkeyp
 
     # Clear LRU cache
     get_scim_resource_types.cache_clear()
-    get_scim_resource.cache_clear()
+    post_scim_resource_search.cache_clear()
 
     user_sub = "a_user"
     oidc_token = mock_oidc_user(sub=user_sub)
@@ -168,7 +168,7 @@ async def test_api_auth_oidc_scim_get_whoami_invalid_config(client, monkeypatch)
 
     # Clear LRU cache
     get_scim_resource_types.cache_clear()
-    get_scim_resource.cache_clear()
+    post_scim_resource_search.cache_clear()
 
     invalid_scim_config = ClientAccessScimSettings(
         scim_base_url=SCIM_CLIENT_ACCESS_SCIM_BASE_URL,

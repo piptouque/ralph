@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import re
 import urllib.parse
 from typing import Callable, Literal, Optional, Union
 
@@ -29,6 +30,7 @@ CLIENT_SECRET = "my-client-secret"
 PUBLIC_KEY_ID = "example-key-id"
 
 SCIM_BASE_URL = "http://providerHost:8080/scim/v2"
+SCIM_USERS_ENDPOINT = "/Users"
 SCIM_CLIENT_ACCESS_SCIM_BASE_URL = SCIM_BASE_URL
 SCIM_CLIENT_ACCESS_SCOPE = "openid"
 SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA = (
@@ -527,7 +529,7 @@ def _mock_scim_resource_types_response():
         "Resources": [
             {
                 "description": "User accounts",
-                "endpoint": f"{SCIM_BASE_URL}/Users",
+                "endpoint": SCIM_USERS_ENDPOINT,
                 "id": "User",
                 "meta": {
                     "location": f"{SCIM_BASE_URL}/ResourceTypes/User",
@@ -550,7 +552,7 @@ def _mock_scim_resource_types_response():
             },
             {
                 "description": "Group management",
-                "endpoint": f"{SCIM_BASE_URL}/Groups",
+                "endpoint": "/Groups",
                 "id": "Group",
                 "meta": {
                     "location": f"{SCIM_BASE_URL}/ResourceTypes/Group",
@@ -585,7 +587,7 @@ def _mock_scim_user_response(
         for group_name in group_names
     ]
     scim_client_data = client_data_to_scim_data(client_data)
-    return {
+    scim_user = {
         "active": True,
         "emails": [],
         "groups": group_data,
@@ -593,7 +595,7 @@ def _mock_scim_user_response(
         "meta": {
             "created": "2026-05-19T09:35:15Z",
             "lastModified": "2026-05-19T11:29:18Z",
-            "location": f"{SCIM_BASE_URL}/Users/{user_sub}",
+            "location": f"{SCIM_BASE_URL}/{SCIM_USERS_ENDPOINT}/{user_sub}",
             "resourceType": "User",
             "version": 'W/"f68d0ddea3d1e2d7"',
         },
@@ -605,6 +607,42 @@ def _mock_scim_user_response(
         SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA: scim_client_data,
         "userName": user_sub,
     }
+    return scim_user
+
+
+def _filter_scim_search(
+    result: Union[dict, Callable[[dict], tuple]],
+    target_attribute: str,
+    target_value: str,
+) -> Callable[[dict], tuple]:
+    no_result = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+        "totalResults": 0,
+        "Resources": [],
+    }
+
+    def _callback(request):
+        body = json.loads(request.body)
+        exp = re.compile(f"{target_attribute}" + r' eq "(?P<user_sub>\w+)"')
+        match = exp.match(body["filter"])
+        if not match or match.group("user_sub") != target_value:
+            return (200, {"Content-Type": "application/json"}, json.dumps(no_result))
+        if isinstance(result, Callable):
+            resource = result(request)
+        else:
+            resource = result
+        res = {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+            "totalResults": 1,
+            "Resources": [resource],
+        }
+        return (
+            200,
+            {"Content-Type": "application/json"},
+            json.dumps(res),
+        )
+
+    return _callback
 
 
 def mock_scim_server(
@@ -634,13 +672,17 @@ def mock_scim_server(
 
     # Mock request to get User
     responses.add_callback(
-        responses.GET,
-        f"{SCIM_BASE_URL}/Users/{user_sub}",
+        responses.POST,
+        f"{SCIM_BASE_URL}/{SCIM_USERS_ENDPOINT}/.search",
         callback=protect_oidc_token_callback(
-            _mock_scim_user_response(
-                user_sub=user_sub,
-                group_names=[group_name] if group_name is not None else [],
-                client_data=user_client_data + group_client_data,
+            _filter_scim_search(
+                result=_mock_scim_user_response(
+                    user_sub=user_sub,
+                    group_names=[group_name] if group_name is not None else [],
+                    client_data=user_client_data + group_client_data,
+                ),
+                target_attribute="userName",
+                target_value=user_sub,
             ),
             access_token=access_token,
         ),
