@@ -200,6 +200,14 @@ class ClientAccessScimSettings(BaseModel):
         "to `client_ids` (jq path)",
         description="Path to `client_ids` (list) in SCIM User Extension" "response.",
     )
+    client_can_edit_jq_path: Annotated[str, AfterValidator(validate_jq_expression)] = (
+        Field(
+            title="SCIM 'Client Access' User extension schema path"
+            "to a `can_edit` flag (jq path)",
+            description="Path to a `can_edit` flag (list) in SCIM User Extension"
+            "response.",
+        )
+    )
     client_name_jq_path: Annotated[
         Optional[str], AfterValidator(validate_jq_expression)
     ] = Field(

@@ -74,5 +74,5 @@ async def whoami(
     if settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS and isinstance(
         user, AuthenticatedOidcUser
     ):
-        data["client_agents"] = user.client_agents
+        data["accessible_clients"] = user.accessible_clients
     return data

@@ -16,12 +16,15 @@ from ralph.conf import ClientAccessScimSettings, settings
 # API auth logger
 logger = logging.getLogger(__name__)
 
+DEFAULT_CAN_EDIT = False
 
-class ClientData(BaseModel):
+
+class ScimClientUserData(BaseModel):
     """Client data fetched from SCIM 'Client Access' Extension."""
 
     client_id: str
-    name: Optional[str]
+    can_edit: bool
+    name: Optional[str] = None
 
 
 @cached(
@@ -81,7 +84,7 @@ def get_user_accessible_clients(
     user_sub: str,
     client_access_config: ClientAccessScimSettings,
     auth_header: str,
-) -> list[ClientData]:
+) -> list[ScimClientUserData]:
     """Get the the ids of OIDC clients that are 'owned' by the authenticated user.
 
     An authenticated user also 'owns' any clients 'owned'
@@ -146,22 +149,28 @@ def get_user_accessible_clients(
             jq.compile(client_access_config.client_id_jq_path).input_value(data).all()
         )
 
-    def get_client_names(data: dict, client_ids: list[str]) -> list[Optional[str]]:
-        if client_access_config.client_name_jq_path:
-            return (
-                jq.compile(client_access_config.client_name_jq_path)
-                .input_value(data)
-                .all()
-            )
-        else:
+    def get_client_can_edit_flags(data: dict) -> list[str]:
+        if not client_access_config.client_can_edit_jq_path:
             return [None] * len(client_ids)
+        return (
+            jq.compile(client_access_config.client_can_edit_jq_path)
+            .input_value(data)
+            .all()
+        )
+
+    def get_client_names(data: dict, client_ids: list[str]) -> list[Optional[str]]:
+        if not client_access_config.client_name_jq_path:
+            return [None] * len(client_ids)
+        return (
+            jq.compile(client_access_config.client_name_jq_path).input_value(data).all()
+        )
 
     data = scim_user[client_access_config.user_extension_schema]
     client_ids = None
     try:
         client_ids = get_client_ids(data)
     except ValueError:
-        logger.error(
+        logger.exception(
             "Input data did not adhere to `client_id` jq schema `%s`",
             client_access_config.client_id_jq_path,
         )
@@ -170,24 +179,41 @@ def get_user_accessible_clients(
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
+    try:
+        client_can_edit_flags = get_client_can_edit_flags(data)
+    except ValueError:
+        logger.warning(
+            "Input data did not adhere to `client_can_edit` jq schema `%s`",
+            client_access_config.client_can_edit_jq_path,
+            stacklevel=logging.WARNING,
+        )
+        client_can_edit_flags = [None] * len(client_ids)
+
     client_names = None
     try:
         client_names = get_client_names(data, client_ids=client_ids)
     except ValueError:
-        logger.warning(
+        logger.exception(
             "Input data did not adhere to `client_name` jq schema `%s`",
             client_access_config.client_name_jq_path,
+            stacklevel=logging.WARNING,
         )
         client_names = [None] * len(client_ids)
 
     try:
         client_data = [
-            ClientData(client_id=client_id, name=client_name if client_name else None)
-            for client_id, client_name in zip(client_ids, client_names)
+            ScimClientUserData(
+                client_id=client_id,
+                name=client_name,
+                can_edit=can_edit if can_edit is not None else False,
+            )
+            for client_id, can_edit, client_name in zip(
+                client_ids, client_can_edit_flags, client_names
+            )
         ]
         return client_data
     except ValidationError as e:
-        logger.error(
+        logger.exception(
             "Client data validation failed",
         )
         raise HTTPException(

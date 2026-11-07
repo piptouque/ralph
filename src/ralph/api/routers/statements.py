@@ -24,7 +24,7 @@ from pydantic.types import Json
 from typing_extensions import Annotated
 
 from ralph.api.auth import get_authenticated_user
-from ralph.api.auth.oidc import AuthenticatedOidcUser
+from ralph.api.auth.oidc import AuthenticatedOidcUser, UserAccessibleAuthority
 from ralph.api.auth.user import AuthenticatedUser
 from ralph.api.forwarding import forward_xapi_statements, get_active_xapi_forwardings
 from ralph.api.models import ErrorDetail, LaxStatement
@@ -77,7 +77,9 @@ POST_PUT_RESPONSES = {
 }
 
 
-def get_accessible_authorities(user: AuthenticatedOidcUser) -> list[BaseXapiAgent]:
+def get_accessible_authorities(
+    user: AuthenticatedOidcUser,
+) -> list[UserAccessibleAuthority]:
     """Get list of authorities that the user can GET/POST statements to.
 
     Note that if `LRS_RESTRICT_BY_AUTHORITY` is False,
@@ -91,18 +93,18 @@ def get_accessible_authorities(user: AuthenticatedOidcUser) -> list[BaseXapiAgen
         list[BaseXapiAgent]: Agents of authorities that
                              the user can GET/POST statements to
     """
-    accessible_authorities = [user.agent]
+    accessible_authorities = [UserAccessibleAuthority(agent=user.agent, can_edit=True)]
     if (
         settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS
         and isinstance(user, AuthenticatedOidcUser)
-        and user.client_agents is not None
+        and user.accessible_clients is not None
     ):
-        accessible_authorities += user.client_agents
+        accessible_authorities += user.accessible_clients
     return accessible_authorities
 
 
 def is_authority_accessible(
-    user: AuthenticatedOidcUser, authority: BaseXapiAgent
+    user: AuthenticatedOidcUser, authority: BaseXapiAgent, read_write: bool
 ) -> bool:
     """Check whether the given authority can be accessed by user.
 
@@ -112,6 +114,8 @@ def is_authority_accessible(
     Args:
         user (AuthenticatedOidcUser): Current user
         authority (BaseXapiAgent): Authority agent
+        read_write (bool): If `True`, Checks whether user can write to this authority.
+                           Otherwise, only checks read access
 
     Returns:
         bool: True if authority is accessible by user, False otherwise
@@ -120,7 +124,8 @@ def is_authority_accessible(
     if not settings.LRS_RESTRICT_BY_AUTHORITY:
         return True
     return any(
-        is_same_ifi(authority, accessible_authority)
+        is_same_ifi(authority, accessible_authority.agent)
+        and (accessible_authority.can_edit or not read_write)
         for accessible_authority in get_accessible_authorities(user=user)
     )
 
@@ -162,7 +167,9 @@ def _enrich_statement_with_authority(
                 "(this should not happen)."
             )
             authority = None
-        if not is_authority_accessible(user=current_user, authority=authority):
+        if not is_authority_accessible(
+            user=current_user, authority=authority, read_write=True
+        ):
             logger.warning(
                 f"Failed to set authority as requested: authority"
                 f"`{json.dumps(authority)}` is not "
@@ -465,10 +472,10 @@ async def get(  # noqa: PLR0913
     if mine:
         accessible_authorities = get_accessible_authorities(user=current_user)
         query_params["authority"] = [
-            _parse_agent_parameters(agent.model_dump(mode="json")).model_dump(
+            _parse_agent_parameters(authority.agent.model_dump(mode="json")).model_dump(
                 mode="json", exclude_none=True
             )
-            for agent in accessible_authorities
+            for authority in accessible_authorities
         ]
     if "mine" in query_params:
         query_params.pop("mine")

@@ -4,14 +4,15 @@ import pytest
 import responses
 from pydantic import TypeAdapter
 
+from ralph.api.auth.oidc import UserAccessibleAuthority
 from ralph.api.auth.scim import (
     get_scim_resource_types,
     post_scim_resource_search,
 )
 from ralph.conf import ClientAccessScimSettings
-from ralph.models.xapi.base.agents import BaseXapiAgentWithOpenId
 
 from tests.fixtures.auth import (
+    SCIM_CLIENT_ACCESS_CLIENT_CAN_EDIT_JQ_PATH,
     SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH,
     SCIM_CLIENT_ACCESS_SCIM_BASE_URL,
     SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
@@ -49,7 +50,7 @@ async def test_api_auth_oidc_scim_get_whoami_valid_no_clients(client, monkeypatc
     assert response.status_code == 200
     assert len(response.json().keys()) == 3
 
-    assert response.json()["client_agents"] == []
+    assert response.json()["accessible_clients"] == []
     assert "target" not in response.json()
 
 
@@ -69,7 +70,7 @@ async def test_api_auth_oidc_scim_get_whoami_valid_clients(client, monkeypatch):
     oidc_token = mock_oidc_user(sub=user_sub)
 
     user_client_data = [
-        {"client_id": "test_client_1", "name": "Test Client 1"},
+        {"client_id": "test_client_1", "name": "Test Client 1", "can_edit": False},
         {"client_id": "test_client_2"},
     ]
     mock_scim_server(
@@ -84,20 +85,26 @@ async def test_api_auth_oidc_scim_get_whoami_valid_clients(client, monkeypatch):
     assert response.status_code == 200
     assert len(response.json().keys()) == 3
 
-    assert response.json()["client_agents"] == [
+    assert response.json()["accessible_clients"] == [
         {
-            "openid": "https://iss.example.com/application/test_client_1",
-            "objectType": "Agent",
-            "name": "Test Client 1",
+            "agent": {
+                "openid": "https://iss.example.com/application/test_client_1",
+                "objectType": "Agent",
+                "name": "Test Client 1",
+            },
+            "can_edit": False,
         },
         {
-            "openid": "https://iss.example.com/application/test_client_2",
-            "objectType": "Agent",
-            "name": None,
+            "agent": {
+                "openid": "https://iss.example.com/application/test_client_2",
+                "objectType": "Agent",
+                "name": None,
+            },
+            "can_edit": False,
         },
     ]
-    assert TypeAdapter(list[BaseXapiAgentWithOpenId]).validate_python(
-        response.json()["client_agents"]
+    assert TypeAdapter(list[UserAccessibleAuthority]).validate_python(
+        response.json()["accessible_clients"]
     )
     assert "target" not in response.json()
 
@@ -118,7 +125,9 @@ async def test_api_auth_oidc_scim_get_whoami_valid_group_clients(client, monkeyp
     oidc_token = mock_oidc_user(sub=user_sub)
 
     group_name = "a_group"
-    client_data = [{"client_id": "test_client_1", "name": "Test Client 1"}]
+    client_data = [
+        {"client_id": "test_client_1", "name": "Test Client 1", "can_edit": False}
+    ]
     group_client_data = [{"client_id": "test_client_3"}]
 
     mock_scim_server(
@@ -137,20 +146,26 @@ async def test_api_auth_oidc_scim_get_whoami_valid_group_clients(client, monkeyp
     assert response.status_code == 200
     assert len(response.json().keys()) == 3
 
-    assert response.json()["client_agents"] == [
+    assert response.json()["accessible_clients"] == [
         {
-            "openid": "https://iss.example.com/application/test_client_1",
-            "objectType": "Agent",
-            "name": "Test Client 1",
+            "agent": {
+                "openid": "https://iss.example.com/application/test_client_1",
+                "objectType": "Agent",
+                "name": "Test Client 1",
+            },
+            "can_edit": False,
         },
         {
-            "openid": "https://iss.example.com/application/test_client_3",
-            "objectType": "Agent",
-            "name": None,
+            "agent": {
+                "openid": "https://iss.example.com/application/test_client_3",
+                "objectType": "Agent",
+                "name": None,
+            },
+            "can_edit": False,
         },
     ]
-    assert TypeAdapter(list[BaseXapiAgentWithOpenId]).validate_python(
-        response.json()["client_agents"]
+    assert TypeAdapter(list[UserAccessibleAuthority]).validate_python(
+        response.json()["accessible_clients"]
     )
     assert "target" not in response.json()
 
@@ -160,7 +175,7 @@ async def test_api_auth_oidc_scim_get_whoami_valid_group_clients(client, monkeyp
 async def test_api_auth_oidc_scim_get_whoami_invalid_config(client, monkeypatch):
     """Test API with an invalid SCIM config.
 
-    Should not make the request fail. Only `client_agents` should return None
+    Should not make the request fail. Only `accessible_clients` should return None
     """
 
     configure_env_for_mock_oidc_auth(monkeypatch)
@@ -173,6 +188,7 @@ async def test_api_auth_oidc_scim_get_whoami_invalid_config(client, monkeypatch)
     invalid_scim_config = ClientAccessScimSettings(
         scim_base_url=SCIM_CLIENT_ACCESS_SCIM_BASE_URL,
         user_extension_schema=SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA,
+        client_can_edit_jq_path=SCIM_CLIENT_ACCESS_CLIENT_CAN_EDIT_JQ_PATH,
         client_id_jq_path=SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH + ".nope",
     )
     monkeypatch.setattr(
@@ -198,5 +214,5 @@ async def test_api_auth_oidc_scim_get_whoami_invalid_config(client, monkeypatch)
     assert response.status_code == 200
     assert len(response.json().keys()) == 3
 
-    assert response.json()["client_agents"] is None
+    assert response.json()["accessible_clients"] is None
     assert "target" not in response.json()

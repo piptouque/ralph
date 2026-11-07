@@ -69,3 +69,10 @@ class AuthenticatedUser(BaseModel):
     agent: BaseXapiAgent
     scopes: UserScopes
     target: Optional[str] = None
+
+
+class UserAccessibleAuthority(BaseModel):
+    """Pydantic model for User-accessible Agent with read-only or write access."""
+
+    agent: BaseXapiAgent
+    can_edit: bool

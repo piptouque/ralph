@@ -37,13 +37,18 @@ SCIM_CLIENT_ACCESS_USER_EXTENSION_SCHEMA = (
     "urn:ietf:params:scim:schemas:extension:client_access:2.0:User"
 )
 SCIM_CLIENT_ACCESS_CLIENT_ID_JQ_PATH = ".clients.[].value"
+SCIM_CLIENT_ACCESS_CLIENT_CAN_EDIT_JQ_PATH = ".clients.[].canEdit"
 SCIM_CLIENT_ACCESS_CLIENT_NAME_JQ_PATH = ".clients.[].display"
 
 
 def client_data_to_scim_data(client_data: list[dict]) -> list[dict]:
     return {
         "clients": [
-            {"value": client["client_id"], "display": client.get("name")}
+            {
+                "value": client["client_id"],
+                "display": client.get("name"),
+                "canEdit": client.get("can_edit"),
+            }
             for client in client_data
         ]
     }

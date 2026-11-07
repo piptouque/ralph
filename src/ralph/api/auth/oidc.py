@@ -16,7 +16,12 @@ from pydantic import AnyUrl, BaseModel, ConfigDict
 from typing_extensions import Annotated
 
 from ralph.api.auth import scim
-from ralph.api.auth.user import AuthenticatedUser, Scope, UserScopes
+from ralph.api.auth.user import (
+    AuthenticatedUser,
+    Scope,
+    UserAccessibleAuthority,
+    UserScopes,
+)
 from ralph.conf import settings
 from ralph.models.xapi.base.agents import BaseXapiAgentWithOpenId
 
@@ -136,7 +141,7 @@ class AuthenticatedOidcUser(AuthenticatedUser):
         sub (str): OIDC user sub (identifier).
     """
 
-    client_agents: Optional[list[BaseXapiAgentWithOpenId]]
+    accessible_clients: Optional[list[UserAccessibleAuthority]]
 
     @classmethod
     def get_agent(cls, iss: str, sub: str) -> BaseXapiAgentWithOpenId:
@@ -149,14 +154,14 @@ class AuthenticatedOidcUser(AuthenticatedUser):
         user_info: UserInfo,
         iss: str,
         scope: Optional[str],
-        client_agents: Optional[list[BaseXapiAgentWithOpenId]] = None,
+        accessible_clients: Optional[list[UserAccessibleAuthority]] = None,
     ):
         """Factory function for `AuthenticatedUser` when it is an OIDC user."""
         return cls(
             agent=cls.get_agent(iss=iss, sub=user_info.sub),
             scopes=get_user_scopes(scope),
             target=user_info.target,
-            client_agents=client_agents,
+            accessible_clients=accessible_clients,
         )
 
 
@@ -467,7 +472,7 @@ def get_oidc_user(
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        client_agents = None
+        accessible_clients = None
         if settings.LRS_EXTEND_AUTHORITY_TO_CLIENT_ACCESS:
             try:
                 client_credentials_auth_header = get_client_credentials_auth_header(
@@ -484,14 +489,19 @@ def get_oidc_user(
                     client_access_config=settings.RUNSERVER_SCIM_CLIENT_ACCESS,
                     auth_header=client_credentials_auth_header,
                 )
-                client_agents = [
-                    AuthenticatedOidcClient.get_agent(
-                        iss=token_info.iss, client_id=client.client_id, name=client.name
+                accessible_clients = [
+                    UserAccessibleAuthority(
+                        agent=AuthenticatedOidcClient.get_agent(
+                            iss=token_info.iss,
+                            client_id=client.client_id,
+                            name=client.name,
+                        ),
+                        can_edit=client.can_edit,
                     )
                     for client in client_data
                 ]
             except HTTPException:
-                client_agents = None
+                accessible_clients = None
                 logger.warning(
                     ("Could not get client ids owner by user: %s, exception occured"),
                     user_info.sub,
@@ -501,5 +511,5 @@ def get_oidc_user(
             user_info=user_info,
             iss=token_info.iss,
             scope=token_info.scope,
-            client_agents=client_agents,
+            accessible_clients=accessible_clients,
         )
